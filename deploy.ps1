@@ -21,6 +21,100 @@ function Get-ServiceApplicationPath([string]$PathName) {
     } | Select-Object -First 1
 }
 
+function Get-ServiceEnvironmentValues([string]$Name) {
+    $values = [Collections.Generic.Dictionary[string, string]]::new(
+        [StringComparer]::OrdinalIgnoreCase)
+
+    foreach ($settingName in @("Port", "BasePath", "BASE_PATH")) {
+        $machineValue = [Environment]::GetEnvironmentVariable(
+            $settingName,
+            [EnvironmentVariableTarget]::Machine)
+        if ($null -ne $machineValue) {
+            $values[$settingName] = $machineValue
+        }
+    }
+
+    $serviceKey = "Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\$Name"
+    $serviceValues = Get-ItemProperty -LiteralPath $serviceKey `
+                                      -Name Environment `
+                                      -ErrorAction SilentlyContinue
+    if ($null -ne $serviceValues -and $null -ne $serviceValues.Environment) {
+        foreach ($entry in @($serviceValues.Environment)) {
+            $separator = $entry.IndexOf('=')
+            if ($separator -gt 0) {
+                $values[$entry.Substring(0, $separator)] = $entry.Substring($separator + 1)
+            }
+        }
+    }
+
+    return $values
+}
+
+function Get-CommandLineSetting([string]$PathName, [string]$Name) {
+    $pattern = '(?i)(?:^|\s)(?:--|/)?{0}(?:\s*=\s*|\s+)(?:"(?<quoted>[^"]*)"|(?<plain>\S*))' -f
+               [regex]::Escape($Name)
+    $matches = [regex]::Matches($PathName, $pattern)
+    if ($matches.Count -eq 0) {
+        return $null
+    }
+
+    $match = $matches[$matches.Count - 1]
+    if ($match.Groups["quoted"].Success) {
+        return $match.Groups["quoted"].Value
+    }
+
+    return $match.Groups["plain"].Value
+}
+
+function Get-ServiceHealthUri([string]$SettingsPath, [string]$Name) {
+    $settings = Get-Content -LiteralPath $SettingsPath -Raw | ConvertFrom-Json
+    $managedService = Get-CimInstance Win32_Service -Filter "Name='$Name'" -ErrorAction Stop
+    $environment = Get-ServiceEnvironmentValues $Name
+
+    $portValue = if ($null -ne $settings.Port) { $settings.Port.ToString() } else { "6500" }
+    if ($environment.ContainsKey("Port")) {
+        $portValue = $environment["Port"]
+    }
+
+    $commandLinePort = Get-CommandLineSetting $managedService.PathName "Port"
+    if ($null -ne $commandLinePort) {
+        $portValue = $commandLinePort
+    }
+
+    $port = 0
+    if (-not [int]::TryParse($portValue, [ref]$port) -or $port -lt 1 -or $port -gt 65535) {
+        throw "The service's effective Port value is invalid: '$portValue'."
+    }
+
+    $basePathValue = if ($null -ne $settings.BasePath) { $settings.BasePath.ToString() } else { "" }
+    if ($environment.ContainsKey("BasePath")) {
+        $basePathValue = $environment["BasePath"]
+    }
+
+    $commandLineBasePath = Get-CommandLineSetting $managedService.PathName "BasePath"
+    if ($null -ne $commandLineBasePath) {
+        $basePathValue = $commandLineBasePath
+    }
+
+    if ([string]::IsNullOrWhiteSpace($basePathValue) -and $environment.ContainsKey("BASE_PATH")) {
+        $basePathValue = $environment["BASE_PATH"]
+    }
+
+    $basePath = if ([string]::IsNullOrWhiteSpace($basePathValue)) {
+        ""
+    } else {
+        $basePathValue.Trim().Trim('/')
+    }
+
+    $hasInvalidSegment = @($basePath.Split('/') | Where-Object { $_ -in @(".", "..") }).Count -gt 0
+    if ($basePath -ne "" -and
+        ($basePath -notmatch '^[-A-Za-z0-9._~]+(?:/[-A-Za-z0-9._~]+)*$' -or $hasInvalidSegment)) {
+        throw "The service's effective BasePath value is invalid: '$basePathValue'."
+    }
+
+    return "http://127.0.0.1:$port$(if ($basePath -eq '') { '' } else { "/$basePath" })/health"
+}
+
 function Assert-ChildPath([string]$Parent, [string]$Child) {
     $prefix = $Parent.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
     if (-not $Child.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
@@ -91,15 +185,13 @@ function Start-ManagedService([string]$Name) {
     Wait-ForServiceState $Name "Running"
 }
 
-function Wait-ForHealth([string]$ServiceName, [int]$Port, [string]$BasePath) {
+function Wait-ForHealth([string]$ServiceName, [string]$Uri) {
     $deadline = [DateTime]::UtcNow.AddSeconds(45)
-    $normalizedBasePath = if ([string]::IsNullOrWhiteSpace($BasePath)) { "" } else { "/$($BasePath.Trim('/'))" }
-    $uri = "http://127.0.0.1:$Port$normalizedBasePath/health"
     $lastError = "No HTTP response."
 
     do {
         try {
-            $response = Invoke-WebRequest -Uri $uri -TimeoutSec 5 -UseBasicParsing
+            $response = Invoke-WebRequest -Uri $Uri -TimeoutSec 5 -UseBasicParsing
             if ($response.StatusCode -eq 200) {
                 return
             }
@@ -110,13 +202,13 @@ function Wait-ForHealth([string]$ServiceName, [int]$Port, [string]$BasePath) {
         }
 
         if ((Get-ManagedServiceState $ServiceName) -eq "Stopped") {
-            throw "Windows service '$ServiceName' stopped before its health check passed at $uri. Last error: $lastError"
+            throw "Windows service '$ServiceName' stopped before its health check passed at $Uri. Last error: $lastError"
         }
 
         Start-Sleep -Seconds 2
     } while ([DateTime]::UtcNow -lt $deadline)
 
-    throw "The service did not become healthy at $uri within 45 seconds. Last error: $lastError"
+    throw "The service did not become healthy at $Uri within 45 seconds. Last error: $lastError"
 }
 
 $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
@@ -199,13 +291,6 @@ foreach ($persistentPath in $persistentPaths) {
     }
 }
 
-$servicePort = if ($null -ne $currentSettings.Port -and [int]$currentSettings.Port -gt 0) {
-    [int]$currentSettings.Port
-} else {
-    6500
-}
-$serviceBasePath = if ($null -eq $currentSettings.BasePath) { "" } else { [string]$currentSettings.BasePath }
-
 if ([string]::IsNullOrWhiteSpace($Version)) {
     $Version = (Get-Content -LiteralPath (Join-Path $projectRoot "version.txt") -Raw).Trim()
 }
@@ -256,7 +341,7 @@ try {
 
     if ($wasRunning) {
         Start-ManagedService $ServiceName
-        Wait-ForHealth $ServiceName $servicePort $serviceBasePath
+        Wait-ForHealth $ServiceName (Get-ServiceHealthUri $currentSettingsPath $ServiceName)
         $serviceStoppedForDeployment = $false
     }
 
@@ -279,7 +364,7 @@ try {
 
         if ($wasRunning -and ($serviceStoppedForDeployment -or $backupCreated)) {
             Start-ManagedService $ServiceName
-            Wait-ForHealth $ServiceName $servicePort $serviceBasePath
+            Wait-ForHealth $ServiceName (Get-ServiceHealthUri $currentSettingsPath $ServiceName)
             $serviceStoppedForDeployment = $false
         }
     } catch {

@@ -73,6 +73,51 @@ function Get-ServiceApplicationPath([string]$PathName) {
     } | Select-Object -First 1
 }
 
+function Get-ServiceEnvironmentValues([string]$Name) {
+    $values = [Collections.Generic.Dictionary[string, string]]::new(
+        [StringComparer]::OrdinalIgnoreCase)
+
+    foreach ($settingName in @("Port", "BasePath", "BASE_PATH")) {
+        $machineValue = [Environment]::GetEnvironmentVariable(
+            $settingName,
+            [EnvironmentVariableTarget]::Machine)
+        if ($null -ne $machineValue) {
+            $values[$settingName] = $machineValue
+        }
+    }
+
+    $serviceKey = "Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\$Name"
+    $serviceValues = Get-ItemProperty -LiteralPath $serviceKey `
+                                      -Name Environment `
+                                      -ErrorAction SilentlyContinue
+    if ($null -ne $serviceValues -and $null -ne $serviceValues.Environment) {
+        foreach ($entry in @($serviceValues.Environment)) {
+            $separator = $entry.IndexOf('=')
+            if ($separator -gt 0) {
+                $values[$entry.Substring(0, $separator)] = $entry.Substring($separator + 1)
+            }
+        }
+    }
+
+    return $values
+}
+
+function Get-CommandLineSetting([string]$PathName, [string]$Name) {
+    $pattern = '(?i)(?:^|\s)(?:--|/)?{0}(?:\s*=\s*|\s+)(?:"(?<quoted>[^"]*)"|(?<plain>\S*))' -f
+               [regex]::Escape($Name)
+    $matches = [regex]::Matches($PathName, $pattern)
+    if ($matches.Count -eq 0) {
+        return $null
+    }
+
+    $match = $matches[$matches.Count - 1]
+    if ($match.Groups["quoted"].Success) {
+        return $match.Groups["quoted"].Value
+    }
+
+    return $match.Groups["plain"].Value
+}
+
 function Test-SameOrDescendant([string]$Parent, [string]$Child) {
     $normalizedParent = [IO.Path]::GetFullPath($Parent).TrimEnd('\', '/')
     $normalizedChild = [IO.Path]::GetFullPath($Child).TrimEnd('\', '/')
@@ -311,7 +356,17 @@ function Expand-VerifiedPackage([string]$PackagePath, [string]$Destination, [Ver
 
     [IO.Compression.ZipFile]::ExtractToDirectory($PackagePath, $Destination)
 
-    foreach ($requiredFile in @("AdbClient.Web.exe", "AdbClient.Web.dll", "appsettings.json", "update.ps1", "update.cmd")) {
+    $requiredFiles = @(
+        "AdbClient.Web.exe",
+        "AdbClient.Web.dll",
+        "appsettings.json",
+        "service-install.bat",
+        "service-firewall.ps1",
+        "service-remove.bat",
+        "update.ps1",
+        "update.cmd"
+    )
+    foreach ($requiredFile in $requiredFiles) {
         $requiredPath = Join-Path $Destination $requiredFile
         if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
             throw "The release package is missing required file '$requiredFile'."
@@ -326,14 +381,51 @@ function Expand-VerifiedPackage([string]$PackagePath, [string]$Destination, [Ver
 
 function Get-HealthUri([string]$SettingsPath) {
     $settings = Get-Content -LiteralPath $SettingsPath -Raw | ConvertFrom-Json
-    $port = if ($null -ne $settings.Port -and [int]$settings.Port -gt 0) { [int]$settings.Port } else { 6500 }
-    $basePath = if ([string]::IsNullOrWhiteSpace($settings.BasePath)) {
-        ""
-    } else {
-        "/" + $settings.BasePath.ToString().Trim('/')
+    $managedService = Get-CimInstance Win32_Service -Filter "Name='$ServiceName'" -ErrorAction Stop
+    $environment = Get-ServiceEnvironmentValues $ServiceName
+
+    $portValue = if ($null -ne $settings.Port) { $settings.Port.ToString() } else { "6500" }
+    if ($environment.ContainsKey("Port")) {
+        $portValue = $environment["Port"]
     }
 
-    return "http://127.0.0.1:$port$basePath/health"
+    $commandLinePort = Get-CommandLineSetting $managedService.PathName "Port"
+    if ($null -ne $commandLinePort) {
+        $portValue = $commandLinePort
+    }
+
+    $port = 0
+    if (-not [int]::TryParse($portValue, [ref]$port) -or $port -lt 1 -or $port -gt 65535) {
+        throw "The service's effective Port value is invalid: '$portValue'."
+    }
+
+    $basePathValue = if ($null -ne $settings.BasePath) { $settings.BasePath.ToString() } else { "" }
+    if ($environment.ContainsKey("BasePath")) {
+        $basePathValue = $environment["BasePath"]
+    }
+
+    $commandLineBasePath = Get-CommandLineSetting $managedService.PathName "BasePath"
+    if ($null -ne $commandLineBasePath) {
+        $basePathValue = $commandLineBasePath
+    }
+
+    if ([string]::IsNullOrWhiteSpace($basePathValue) -and $environment.ContainsKey("BASE_PATH")) {
+        $basePathValue = $environment["BASE_PATH"]
+    }
+
+    $basePath = if ([string]::IsNullOrWhiteSpace($basePathValue)) {
+        ""
+    } else {
+        $basePathValue.Trim().Trim('/')
+    }
+
+    $hasInvalidSegment = @($basePath.Split('/') | Where-Object { $_ -in @(".", "..") }).Count -gt 0
+    if ($basePath -ne "" -and
+        ($basePath -notmatch '^[-A-Za-z0-9._~]+(?:/[-A-Za-z0-9._~]+)*$' -or $hasInvalidSegment)) {
+        throw "The service's effective BasePath value is invalid: '$basePathValue'."
+    }
+
+    return "http://127.0.0.1:$port$(if ($basePath -eq '') { '' } else { "/$basePath" })/health"
 }
 
 function Wait-ForHealth([string]$Uri) {
@@ -547,12 +639,7 @@ try {
     }
 
     $action = "replace version $currentVersion with $($release.Version), restart '$ServiceName', and retain a rollback copy"
-    if (-not $Force -and -not $PSCmdlet.ShouldProcess($ApplicationDirectory, $action)) {
-        return
-    }
-
-    if ($Force -and $WhatIfPreference) {
-        $PSCmdlet.ShouldProcess($ApplicationDirectory, $action) | Out-Null
+    if (-not $PSCmdlet.ShouldProcess($ApplicationDirectory, $action)) {
         return
     }
 
