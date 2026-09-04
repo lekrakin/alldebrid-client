@@ -393,6 +393,8 @@ public class SettingDataTest
     [InlineData("Provider:TrackerEnrichmentList", "file:///trackers.txt")]
     [InlineData("Downloads:Defaults:Category", "../outside")]
     [InlineData("Integrations:Categories", "radarr,../outside")]
+    [InlineData("Storage:DownloadPath", "invalid\0path")]
+    [InlineData("WatchFolder:InboxPath", "invalid\0path")]
     public async Task Update_RejectsValuesThatWouldFailDownstream(string key, string value)
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
@@ -469,5 +471,91 @@ public class SettingDataTest
         Assert.Equal("2", persisted["Downloads:ConcurrentFiles"].Value);
         Assert.Null(persisted["Downloads:Defaults:IncludeRegex"].Value);
         Assert.Null(persisted["Provider:TrackerEnrichmentList"].Value);
+    }
+
+    [Fact]
+    public async Task Update_ResolvesRelativeLocalPathsFromApplicationDirectory()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<DataContext>()
+                     .UseSqlite(connection)
+                     .Options;
+        await using var dataContext = new DataContext(options);
+        await dataContext.Database.EnsureCreatedAsync();
+
+        var settingData = new SettingData(dataContext, Mock.Of<ILogger<SettingData>>());
+        await settingData.Seed();
+
+        var root = Path.Combine("runtime-path-tests", Guid.NewGuid().ToString("N"));
+        var downloadPath = Path.Combine(root, "downloads");
+        var copyPath = Path.Combine(root, "copies");
+        var executablePath = Path.Combine(root, "tools", "complete.exe");
+        var inboxPath = Path.Combine(root, "watch");
+        var processedPath = Path.Combine(root, "processed");
+        var errorPath = Path.Combine(root, "errors");
+        const string reportedPath = "client/downloads";
+
+        await settingData.Update([
+            new SettingProperty { Key = "Storage:DownloadPath", Value = downloadPath },
+            new SettingProperty { Key = "Integrations:AddedTorrentCopyPath", Value = copyPath },
+            new SettingProperty { Key = "Integrations:CompletionCommand:ExecutablePath", Value = executablePath },
+            new SettingProperty { Key = "WatchFolder:InboxPath", Value = inboxPath },
+            new SettingProperty { Key = "WatchFolder:ProcessedPath", Value = processedPath },
+            new SettingProperty { Key = "WatchFolder:ErrorPath", Value = errorPath },
+            new SettingProperty { Key = "Integrations:ReportedDownloadPath", Value = reportedPath }
+        ]);
+
+        Assert.Equal(Path.GetFullPath(downloadPath, AppContext.BaseDirectory), SettingData.Get.Storage.DownloadPath);
+        Assert.Equal(Path.GetFullPath(copyPath, AppContext.BaseDirectory), SettingData.Get.Integrations.AddedTorrentCopyPath);
+        Assert.Equal(
+            Path.GetFullPath(executablePath, AppContext.BaseDirectory),
+            SettingData.Get.Integrations.CompletionCommand.ExecutablePath);
+        Assert.Equal(Path.GetFullPath(inboxPath, AppContext.BaseDirectory), SettingData.Get.WatchFolder.InboxPath);
+        Assert.Equal(Path.GetFullPath(processedPath, AppContext.BaseDirectory), SettingData.Get.WatchFolder.ProcessedPath);
+        Assert.Equal(Path.GetFullPath(errorPath, AppContext.BaseDirectory), SettingData.Get.WatchFolder.ErrorPath);
+        Assert.Equal(reportedPath, SettingData.Get.Integrations.ReportedDownloadPath);
+
+        var persisted = await dataContext.Settings.AsNoTracking().ToDictionaryAsync(setting => setting.SettingId);
+        Assert.Equal(Path.GetFullPath(downloadPath, AppContext.BaseDirectory), persisted["Storage:DownloadPath"].Value);
+        Assert.Equal(reportedPath, persisted["Integrations:ReportedDownloadPath"].Value);
+    }
+
+    [Fact]
+    public async Task Update_PreservesAbsoluteLocalPaths()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<DataContext>()
+                     .UseSqlite(connection)
+                     .Options;
+        await using var dataContext = new DataContext(options);
+        await dataContext.Database.EnsureCreatedAsync();
+
+        var settingData = new SettingData(dataContext, Mock.Of<ILogger<SettingData>>());
+        await settingData.Seed();
+
+        var absolutePath = Path.GetFullPath(Path.Combine(
+            Path.GetTempPath(),
+            "adbclient-absolute-path-tests",
+            Guid.NewGuid().ToString("N")));
+
+        await settingData.Update([
+            new SettingProperty { Key = "Storage:DownloadPath", Value = absolutePath },
+            new SettingProperty { Key = "Integrations:AddedTorrentCopyPath", Value = absolutePath },
+            new SettingProperty { Key = "Integrations:CompletionCommand:ExecutablePath", Value = absolutePath },
+            new SettingProperty { Key = "WatchFolder:InboxPath", Value = absolutePath },
+            new SettingProperty { Key = "WatchFolder:ProcessedPath", Value = absolutePath },
+            new SettingProperty { Key = "WatchFolder:ErrorPath", Value = absolutePath }
+        ]);
+
+        Assert.Equal(absolutePath, SettingData.Get.Storage.DownloadPath);
+        Assert.Equal(absolutePath, SettingData.Get.Integrations.AddedTorrentCopyPath);
+        Assert.Equal(absolutePath, SettingData.Get.Integrations.CompletionCommand.ExecutablePath);
+        Assert.Equal(absolutePath, SettingData.Get.WatchFolder.InboxPath);
+        Assert.Equal(absolutePath, SettingData.Get.WatchFolder.ProcessedPath);
+        Assert.Equal(absolutePath, SettingData.Get.WatchFolder.ErrorPath);
     }
 }

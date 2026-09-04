@@ -218,6 +218,36 @@ public class SettingData(DataContext dataContext, ILogger<SettingData> logger)
             "Provider:TrackerEnrichmentList",
             settings.Provider.TrackerEnrichmentList,
             rejectInvalidValues);
+        settings.Storage.DownloadPath = NormalizeLocalPath(
+            "Storage:DownloadPath",
+            settings.Storage.DownloadPath,
+            new DbSettingsStorage().DownloadPath,
+            rejectInvalidValues)!;
+        settings.Integrations.AddedTorrentCopyPath = NormalizeLocalPath(
+            "Integrations:AddedTorrentCopyPath",
+            settings.Integrations.AddedTorrentCopyPath,
+            null,
+            rejectInvalidValues);
+        settings.Integrations.CompletionCommand.ExecutablePath = NormalizeLocalPath(
+            "Integrations:CompletionCommand:ExecutablePath",
+            settings.Integrations.CompletionCommand.ExecutablePath,
+            null,
+            rejectInvalidValues);
+        settings.WatchFolder.InboxPath = NormalizeLocalPath(
+            "WatchFolder:InboxPath",
+            settings.WatchFolder.InboxPath,
+            null,
+            rejectInvalidValues);
+        settings.WatchFolder.ProcessedPath = NormalizeLocalPath(
+            "WatchFolder:ProcessedPath",
+            settings.WatchFolder.ProcessedPath,
+            null,
+            rejectInvalidValues);
+        settings.WatchFolder.ErrorPath = NormalizeLocalPath(
+            "WatchFolder:ErrorPath",
+            settings.WatchFolder.ErrorPath,
+            null,
+            rejectInvalidValues);
 
         if (PathsAreEquivalent(settings.Storage.DownloadPath, settings.Integrations.ReportedDownloadPath))
         {
@@ -322,6 +352,39 @@ public class SettingData(DataContext dataContext, ILogger<SettingData> logger)
             "Value must be an absolute HTTP or HTTPS URL.",
             null,
             rejectInvalidValues);
+    }
+
+    private string? NormalizeLocalPath(
+        string key,
+        string? value,
+        string? defaultValue,
+        bool rejectInvalidValues)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return defaultValue;
+        }
+
+        var path = value.Trim();
+
+        try
+        {
+            if (Path.IsPathRooted(path))
+            {
+                _ = Path.GetFullPath(path, AppContext.BaseDirectory);
+                return path;
+            }
+
+            return Path.GetFullPath(path, AppContext.BaseDirectory);
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or NotSupportedException)
+        {
+            return HandleInvalidValue(
+                key,
+                "Value must be a valid local filesystem path.",
+                defaultValue,
+                rejectInvalidValues);
+        }
     }
 
     private T HandleInvalidValue<T>(string key, string reason, T defaultValue, bool rejectInvalidValues)
