@@ -12,8 +12,37 @@ namespace AdbClient.Web.Controllers;
 
 [Authorize(Policy = "AuthSetting")]
 [Route("Api/Settings")]
-public class SettingsController(Settings settings, Torrents torrents) : Controller
+public class SettingsController : Controller
 {
+    private const string DefaultDownloadSpeedTestUrl = "https://speed.cloudflare.com/__down?bytes=52428800";
+    private const int DefaultWriteTestFileSize = 64 * 1024 * 1024;
+    private const int TemporaryNameAttempts = 10;
+
+    private readonly string _downloadSpeedTestUrl;
+    private readonly int _writeTestFileSize;
+    private readonly Settings _settings;
+    private readonly Torrents _torrents;
+
+    public SettingsController(Settings settings, Torrents torrents)
+        : this(settings, torrents, DefaultDownloadSpeedTestUrl, DefaultWriteTestFileSize)
+    {
+    }
+
+    protected SettingsController(
+        Settings settings,
+        Torrents torrents,
+        string downloadSpeedTestUrl,
+        int writeTestFileSize)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(downloadSpeedTestUrl);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(writeTestFileSize);
+
+        _settings = settings;
+        _torrents = torrents;
+        _downloadSpeedTestUrl = downloadSpeedTestUrl;
+        _writeTestFileSize = writeTestFileSize;
+    }
+
     [HttpGet]
     [Route("")]
     public ActionResult Get()
@@ -33,7 +62,7 @@ public class SettingsController(Settings settings, Torrents torrents) : Controll
 
         try
         {
-            await settings.Update(settings1);
+            await _settings.Update(settings1);
             return Ok();
         }
         catch (ArgumentException ex)
@@ -48,7 +77,7 @@ public class SettingsController(Settings settings, Torrents torrents) : Controll
     {
         try
         {
-            var profile = await torrents.GetProfile();
+            var profile = await _torrents.GetProfile();
             return Ok(profile);
         }
         catch (Exception ex) when (ex.Message.Contains("API Key not set"))
@@ -69,7 +98,9 @@ public class SettingsController(Settings settings, Torrents torrents) : Controll
 
     [HttpPost]
     [Route("TestPath")]
-    public async Task<ActionResult> TestPath([FromBody] SettingsControllerTestPathRequest? request)
+    public async Task<ActionResult> TestPath(
+        [FromBody] SettingsControllerTestPathRequest? request,
+        CancellationToken cancellationToken)
     {
         if (request == null)
         {
@@ -81,20 +112,34 @@ public class SettingsController(Settings settings, Torrents torrents) : Controll
             return BadRequest("Invalid path");
         }
 
-        var path = request.Path.TrimEnd('/').TrimEnd('\\');
+        var path = Path.TrimEndingDirectorySeparator(request.Path.Trim());
 
         if (!Directory.Exists(path))
         {
             throw new Exception($"Path {path} does not exist");
         }
 
-        var testFile = $"{path}/test.txt";
+        string? testFilePath = null;
 
-        await System.IO.File.WriteAllTextAsync(testFile, "AllDebrid Client test file; you can remove this file.");
+        try
+        {
+            await using (var fileStream = CreateTemporaryFile(path, "path-test", out testFilePath))
+            {
+                await fileStream.WriteAsync(
+                    "AllDebrid Client path test."u8.ToArray(),
+                    cancellationToken);
+                await fileStream.FlushAsync(cancellationToken);
+            }
 
-        await FileHelper.Delete(testFile);
-
-        return Ok();
+            return Ok();
+        }
+        finally
+        {
+            if (testFilePath != null)
+            {
+                await FileHelper.Delete(testFilePath);
+            }
+        }
     }
 
     [HttpGet]
@@ -103,77 +148,147 @@ public class SettingsController(Settings settings, Torrents torrents) : Controll
     {
         var downloadPath = Settings.Get.Storage.DownloadPath;
 
-        var testFilePath = Path.Combine(downloadPath, "speed-test.bin");
+        if (string.IsNullOrWhiteSpace(downloadPath) || !Directory.Exists(downloadPath))
+        {
+            throw new DirectoryNotFoundException($"Download path {downloadPath} does not exist.");
+        }
 
-        await FileHelper.Delete(testFilePath);
+        var testDirectory = CreateTemporaryDirectory(downloadPath, "download-test");
+        DownloadClient? downloadClient = null;
 
         try
         {
             var download = new Download
             {
-                Link = "https://speed.cloudflare.com/__down?bytes=52428800",
-                FileName = "speed-test.bin",
+                Link = _downloadSpeedTestUrl,
+                FileName = "payload.bin",
                 Torrent = new()
                 {
                     DownloadClient = AdbClient.Data.Enums.DownloadClient.Internal,
-                    RdName = "speed-test.bin"
+                    RdName = "transfer"
                 }
             };
 
-            var downloadClient = new DownloadClient(download, download.Torrent, downloadPath);
-            using var cancellationRegistration = cancellationToken.Register(() =>
-            {
-                _ = downloadClient.Cancel();
-            });
-
+            downloadClient = new DownloadClient(download, download.Torrent, testDirectory);
             await downloadClient.Start();
+
+            var completion = await downloadClient.WaitForCompletionAsync(cancellationToken);
+
+            if (!string.IsNullOrWhiteSpace(completion.Error))
+            {
+                throw new IOException($"The download speed test failed: {completion.Error}");
+            }
 
             return Ok(downloadClient.Speed);
         }
         finally
         {
-            await FileHelper.Delete(testFilePath);
+            try
+            {
+                if (downloadClient != null)
+                {
+                    await downloadClient.Cancel();
+                }
+            }
+            finally
+            {
+                await FileHelper.DeleteDirectory(testDirectory);
+            }
         }
     }
 
     [HttpGet]
     [Route("TestWriteSpeed")]
-    public async Task<ActionResult> TestWriteSpeed()
+    public async Task<ActionResult> TestWriteSpeed(CancellationToken cancellationToken)
     {
         var downloadPath = Settings.Get.Storage.DownloadPath;
 
-        var testFilePath = Path.Combine(downloadPath, "test.tmp");
-
-        await FileHelper.Delete(testFilePath);
-
-        const int testFileSize = 64 * 1024 * 1024;
-
-        var watch = new Stopwatch();
-
-        watch.Start();
-
-        var rnd = new Random();
-
-        await using var fileStream = new FileStream(testFilePath, FileMode.Create, FileAccess.Write, FileShare.Write);
-
-        var buffer = new byte[64 * 1024];
-
-        while (fileStream.Length < testFileSize)
+        if (string.IsNullOrWhiteSpace(downloadPath) || !Directory.Exists(downloadPath))
         {
-            rnd.NextBytes(buffer);
-
-            await fileStream.WriteAsync(buffer.AsMemory(0, buffer.Length));
+            throw new DirectoryNotFoundException($"Download path {downloadPath} does not exist.");
         }
 
-        watch.Stop();
+        string? testFilePath = null;
 
-        var writeSpeed = fileStream.Length / watch.Elapsed.TotalSeconds;
+        try
+        {
+            var watch = Stopwatch.StartNew();
+            long bytesWritten;
 
-        fileStream.Close();
+            await using (var fileStream = CreateTemporaryFile(downloadPath, "write-test", out testFilePath))
+            {
+                var buffer = new byte[64 * 1024];
 
-        await FileHelper.Delete(testFilePath);
+                while (fileStream.Length < _writeTestFileSize)
+                {
+                    Random.Shared.NextBytes(buffer);
+                    var count = (int)Math.Min(buffer.Length, _writeTestFileSize - fileStream.Length);
+                    await fileStream.WriteAsync(buffer.AsMemory(0, count), cancellationToken);
+                }
 
-        return Ok(writeSpeed);
+                await fileStream.FlushAsync(cancellationToken);
+                bytesWritten = fileStream.Length;
+            }
+
+            watch.Stop();
+            return Ok(bytesWritten / watch.Elapsed.TotalSeconds);
+        }
+        finally
+        {
+            if (testFilePath != null)
+            {
+                await FileHelper.Delete(testFilePath);
+            }
+        }
     }
 
+    private static FileStream CreateTemporaryFile(string directory, string purpose, out string path)
+    {
+        path = string.Empty;
+
+        for (var attempt = 0; attempt < TemporaryNameAttempts; attempt++)
+        {
+            path = Path.Combine(directory, $".adbclient-{purpose}-{Guid.NewGuid():N}.tmp");
+
+            try
+            {
+                return new FileStream(
+                    path,
+                    FileMode.CreateNew,
+                    FileAccess.Write,
+                    FileShare.None,
+                    64 * 1024,
+                    FileOptions.Asynchronous | FileOptions.SequentialScan);
+            }
+            catch (IOException) when (System.IO.File.Exists(path))
+            {
+            }
+        }
+
+        throw new IOException($"Unable to reserve a temporary file in {directory}.");
+    }
+
+    private static string CreateTemporaryDirectory(string directory, string purpose)
+    {
+        for (var attempt = 0; attempt < TemporaryNameAttempts; attempt++)
+        {
+            var path = Path.Combine(directory, $".adbclient-{purpose}-{Guid.NewGuid():N}");
+
+            if (Directory.Exists(path) || System.IO.File.Exists(path))
+            {
+                continue;
+            }
+
+            try
+            {
+                Directory.CreateDirectory(path);
+                return path;
+            }
+            catch (IOException) when (Directory.Exists(path) || System.IO.File.Exists(path))
+            {
+            }
+        }
+
+        throw new IOException($"Unable to reserve a temporary directory in {directory}.");
+    }
 }

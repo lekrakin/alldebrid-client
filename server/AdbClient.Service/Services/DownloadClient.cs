@@ -1,4 +1,4 @@
-﻿using AdbClient.Data.Enums;
+using AdbClient.Data.Enums;
 using AdbClient.Data.Models.Data;
 using AdbClient.Service.Helpers;
 using AdbClient.Service.Services.Downloaders;
@@ -9,6 +9,8 @@ public class DownloadClient(Download download, Torrent torrent, string destinati
 {
     private static long _totalBytesDownloadedThisSession;
     private static readonly Lock TotalBytesDownloadedLock = new();
+    private readonly TaskCompletionSource<DownloadCompleteEventArgs> _completion = new(
+        TaskCreationOptions.RunContinuationsAsynchronously);
 
     public IDownloader? Downloader;
 
@@ -59,6 +61,7 @@ public class DownloadClient(Download download, Torrent torrent, string destinati
             {
                 Finished = true;
                 Error ??= args.Error;
+                _completion.TrySetResult(args);
             };
 
             Downloader.DownloadProgress += (_, args) =>
@@ -89,6 +92,11 @@ public class DownloadClient(Download download, Torrent torrent, string destinati
 
             throw new Exception($"An unexpected error occurred preparing download {download.Link} for torrent {torrent.RdName}: {ex.Message}");
         }
+    }
+
+    public Task<DownloadCompleteEventArgs> WaitForCompletionAsync(CancellationToken cancellationToken = default)
+    {
+        return _completion.Task.WaitAsync(cancellationToken);
     }
 
     public async Task Cancel()
