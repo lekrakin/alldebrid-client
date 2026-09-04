@@ -21,7 +21,7 @@ internal static class TorrentTrackerPolicy
         if (blockedUrls.Count > 0)
         {
             throw new InvalidDataException(
-                $"Cannot add torrent because it contains blocked trackers: {string.Join(", ", blockedUrls)}.");
+                $"Cannot add torrent because it contains blocked trackers ({blockedUrls.Count}).");
         }
     }
 
@@ -37,7 +37,7 @@ internal static class TorrentTrackerPolicy
         if (!string.IsNullOrWhiteSpace(torrent.Source) && IsBlocked(torrent.Source, blockedTrackers))
         {
             throw new InvalidDataException(
-                $"Cannot add torrent because its source '{torrent.Source}' is blocked.");
+                "Cannot add torrent because its source matches the blocked tracker policy.");
         }
 
         var announceUrls = torrent.AnnounceUrls ?? [];
@@ -49,7 +49,7 @@ internal static class TorrentTrackerPolicy
         if (blockedUrls.Count > 0)
         {
             throw new InvalidDataException(
-                $"Cannot add torrent because it contains blocked trackers: {string.Join(", ", blockedUrls)}.");
+                $"Cannot add torrent because it contains blocked trackers ({blockedUrls.Count}).");
         }
     }
 

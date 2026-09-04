@@ -103,22 +103,42 @@ public sealed class QBittorrentCompatibility(
             if (!Uri.TryCreate(normalizedTorrentUrl, UriKind.Absolute, out var uri) ||
                 (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
             {
-                throw new ArgumentException($"Unsupported torrent URL: {normalizedTorrentUrl}", nameof(urls));
+                throw new ArgumentException("Unsupported torrent URL.", nameof(urls));
             }
 
-            logger.LogDebug("Downloading torrent metadata from {TorrentUrl}", uri);
+            logger.LogDebug(
+                "Downloading torrent metadata from {TorrentScheme} origin {TorrentHost} on port {TorrentPort}",
+                uri.Scheme,
+                uri.IdnHost,
+                uri.Port);
 
             var client = httpClientFactory.CreateClient();
-            using var response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-            response.EnsureSuccessStatusCode();
+            byte[] fileBytes;
 
-            if (response.Content.Headers.ContentLength > MaxTorrentFileSizeBytes)
+            try
             {
-                throw new ArgumentException("Torrent file exceeds the 32 MB limit.", nameof(urls));
+                using var response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                response.EnsureSuccessStatusCode();
+
+                if (response.Content.Headers.ContentLength > MaxTorrentFileSizeBytes)
+                {
+                    throw new ArgumentException("Torrent file exceeds the 32 MB limit.", nameof(urls));
+                }
+
+                await response.Content.LoadIntoBufferAsync(MaxTorrentFileSizeBytes, cancellationToken);
+                fileBytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+            }
+            catch (HttpRequestException ex)
+            {
+                logger.LogDebug(
+                    "Torrent metadata request failed with {ExceptionType}",
+                    ex.GetType().Name);
+
+                // Do not retain the original exception: HTTP exception messages can contain
+                // the complete request URI, which may include credentials or passkeys.
+                throw new HttpRequestException("Unable to download torrent metadata.", null, ex.StatusCode);
             }
 
-            await response.Content.LoadIntoBufferAsync(MaxTorrentFileSizeBytes, cancellationToken);
-            var fileBytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
             await torrents.AddFileToDebridQueue(fileBytes, torrent);
         }
     }
@@ -159,14 +179,14 @@ public sealed class QBittorrentCompatibility(
 
         if (!isValidInfoHashSearch)
         {
-            throw new ArgumentException($"Unsupported Nyaa search URL: {torrentUrl}", nameof(torrentUrl));
+            throw new ArgumentException("Unsupported Nyaa search URL.", nameof(torrentUrl));
         }
 
         var infoHash = uri.Query[queryPrefix.Length..];
 
         if (infoHash.Any(character => !Uri.IsHexDigit(character)))
         {
-            throw new ArgumentException($"Unsupported Nyaa search URL: {torrentUrl}", nameof(torrentUrl));
+            throw new ArgumentException("Unsupported Nyaa search URL.", nameof(torrentUrl));
         }
 
         return $"magnet:?xt=urn:btih:{infoHash.ToLowerInvariant()}";

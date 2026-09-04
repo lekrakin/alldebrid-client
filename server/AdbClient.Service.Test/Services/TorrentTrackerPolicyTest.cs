@@ -22,7 +22,9 @@ public class TorrentTrackerPolicyTest
         var originalBlockedTrackers = Settings.Get.Provider.BannedTrackers;
         var torrentData = new Mock<ITorrentData>();
         var enricher = new Mock<IEnricher>();
-        var enrichedMagnet = $"{OriginalMagnet}&tr={Uri.EscapeDataString("https://PRIVATE.example/announce")}";
+        const string blockedTracker =
+            "https://tracker-user:tracker-password@private.example/announce/private-passkey?token=query-secret#fragment-secret";
+        var enrichedMagnet = $"{OriginalMagnet}&tr={Uri.EscapeDataString(blockedTracker)}";
         enricher.Setup(value => value.EnrichMagnetLink(OriginalMagnet)).ReturnsAsync(enrichedMagnet);
         var service = CreateService(torrentData, enricher);
 
@@ -34,6 +36,11 @@ public class TorrentTrackerPolicyTest
                 service.AddMagnetToDebridQueue(OriginalMagnet, new Torrent()));
 
             Assert.Contains("blocked trackers", exception.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("tracker-user", exception.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain("tracker-password", exception.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain("private-passkey", exception.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain("query-secret", exception.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain("fragment-secret", exception.Message, StringComparison.Ordinal);
             torrentData.VerifyNoOtherCalls();
         }
         finally
@@ -52,19 +59,25 @@ public class TorrentTrackerPolicyTest
             "d4:infod6:lengthi1e4:name11:episode.mkv12:piece lengthi16384e6:pieces20:00000000000000000000ee");
         var enrichedDictionary = BEncodedValue.Decode<BEncodedDictionary>(originalBytes);
         var info = (BEncodedDictionary)enrichedDictionary["info"];
-        info["source"] = new BEncodedString("PRIVATE-SITE");
+        info["source"] = new BEncodedString(
+            "https://source-user:source-password@private.example/source/private-passkey?token=query-secret#fragment-secret");
         var enrichedBytes = enrichedDictionary.Encode();
         enricher.Setup(value => value.EnrichTorrentBytes(originalBytes)).ReturnsAsync(enrichedBytes);
         var service = CreateService(torrentData, enricher);
 
         try
         {
-            Settings.Get.Provider.BannedTrackers = " private-site ";
+            Settings.Get.Provider.BannedTrackers = " PRIVATE.EXAMPLE ";
 
             var exception = await Assert.ThrowsAsync<InvalidDataException>(() =>
                 service.AddFileToDebridQueue(originalBytes, new Torrent()));
 
             Assert.Contains("source", exception.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("source-user", exception.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain("source-password", exception.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain("private-passkey", exception.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain("query-secret", exception.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain("fragment-secret", exception.Message, StringComparison.Ordinal);
             torrentData.VerifyNoOtherCalls();
         }
         finally

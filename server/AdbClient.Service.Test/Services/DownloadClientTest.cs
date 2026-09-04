@@ -67,14 +67,24 @@ public class DownloadClientTest
         try
         {
             var exception = await Assert.ThrowsAsync<Exception>(() => client.Start());
-            await client.WaitForCompletionAsync().WaitAsync(TimeSpan.FromSeconds(1));
+            var completion = await client.WaitForCompletionAsync().WaitAsync(TimeSpan.FromSeconds(1));
+            var primaryError = $"InvalidOperationException (HRESULT 0x{new InvalidOperationException().HResult:X8}) for download 'file.bin' from host 'example.invalid'.";
+            var cleanupError = $"IOException (HRESULT 0x{new IOException().HResult:X8}) for download 'file.bin' from host 'example.invalid'.";
 
-            Assert.Contains("Download start failed.", exception.Message);
+            Assert.Contains("preparing download 'file.bin' from host 'example.invalid' for torrent failed-start", exception.Message);
+            Assert.Contains(primaryError, exception.Message);
             var aggregate = Assert.IsType<AggregateException>(exception.InnerException);
-            Assert.Contains(aggregate.InnerExceptions, error => error.Message == "Download start failed.");
-            Assert.Contains(aggregate.InnerExceptions, error => error.Message == "Download cleanup failed.");
+            Assert.Contains(
+                aggregate.InnerExceptions,
+                error => error.Message == primaryError);
+            Assert.Contains(
+                aggregate.InnerExceptions,
+                error => error.Message == cleanupError);
+            Assert.DoesNotContain("Download start failed.", exception.ToString());
+            Assert.DoesNotContain("Download cleanup failed.", exception.ToString());
             Assert.True(client.Finished);
-            Assert.Equal("Download start failed.", client.Error);
+            Assert.Equal(primaryError, client.Error);
+            Assert.Equal(primaryError, completion.Error);
             Assert.Equal(1, downloader.CancelCalls);
         }
         finally

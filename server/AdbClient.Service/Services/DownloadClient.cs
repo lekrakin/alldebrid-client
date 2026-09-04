@@ -132,7 +132,9 @@ public class DownloadClient
         }
         catch (Exception ex)
         {
-            Error = ex.Message;
+            var safeError = Logger.DescribeDownloadFailure(ex, _download);
+            Error = safeError;
+            var downloadSource = Logger.DescribeDownloadSource(_download);
             Exception? cancellationError = null;
 
             try
@@ -141,16 +143,18 @@ public class DownloadClient
             }
             catch (Exception cancelException)
             {
-                cancellationError = cancelException;
+                cancellationError = new Exception(Logger.DescribeDownloadFailure(cancelException, _download));
             }
 
-            Complete(new() { Error = ex.Message });
+            Complete(new() { Error = safeError });
+
+            var preparationError = new Exception(safeError);
 
             throw new Exception(
-                $"An unexpected error occurred preparing download {_download.Link} for torrent {_torrent.RdName}: {ex.Message}",
+                $"An unexpected error occurred preparing {downloadSource} for torrent {_torrent.RdName}: {safeError}",
                 cancellationError == null
-                    ? ex
-                    : new AggregateException(ex, cancellationError));
+                    ? preparationError
+                    : new AggregateException(preparationError, cancellationError));
         }
     }
 

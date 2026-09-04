@@ -65,7 +65,9 @@ public class UnpackClient
         }
         catch (Exception ex)
         {
-            Error = $"An unexpected error occurred preparing download {_download.Link} for torrent {_torrent.RdName}: {ex.Message}";
+            var downloadSource = Logger.DescribeDownloadSource(_download);
+            var safeError = Logger.DescribeDownloadFailure(ex, _download);
+            Error = $"An unexpected error occurred preparing {downloadSource} for torrent {_torrent.RdName}: {safeError}";
             Complete();
         }
     }
@@ -115,7 +117,9 @@ public class UnpackClient
         }
         catch (Exception ex)
         {
-            Error = $"An unexpected error occurred unpacking {_download.Link} for torrent {_torrent.RdName}: {ex.Message}";
+            var downloadSource = Logger.DescribeDownloadSource(_download);
+            var safeError = Logger.DescribeDownloadFailure(ex, _download);
+            Error = $"An unexpected error occurred unpacking {downloadSource} for torrent {_torrent.RdName}: {safeError}";
         }
         finally
         {

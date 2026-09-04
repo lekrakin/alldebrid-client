@@ -24,7 +24,7 @@ public class TrackerListGrabber(IHttpClientFactory httpClientFactory, IMemoryCac
         if (!Uri.TryCreate(trackerUrlList, UriKind.Absolute, out var trackerUri) ||
             (trackerUri.Scheme != Uri.UriSchemeHttp && trackerUri.Scheme != Uri.UriSchemeHttps))
         {
-            logger.LogWarning("Invalid tracker list URL format: {Url}", trackerUrlList);
+            logger.LogWarning("Invalid tracker list URL format; expected an absolute HTTP or HTTPS URL.");
 
             return [];
         }
@@ -87,15 +87,17 @@ public class TrackerListGrabber(IHttpClientFactory httpClientFactory, IMemoryCac
         }
         catch (TaskCanceledException ex)
         {
-            logger.LogError(ex, "Fetching tracker list was canceled (timeout or cancellation).");
+            logger.LogError(
+                "Fetching tracker list was canceled (timeout or cancellation, {ExceptionType}).",
+                ex.GetType().Name);
 
-            throw new TaskCanceledException("Fetching tracker list was canceled due to timeout or cancellation.", ex);
+            throw new TaskCanceledException("Fetching tracker list was canceled due to timeout or cancellation.");
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Unable to fetch tracker list.");
+            logger.LogError("Unable to fetch tracker list ({ExceptionType}).", ex.GetType().Name);
 
-            throw new Exception("Unable to fetch tracker list for enrichment.", ex);
+            throw new Exception("Unable to fetch tracker list for enrichment.");
         }
         finally
         {
@@ -105,7 +107,11 @@ public class TrackerListGrabber(IHttpClientFactory httpClientFactory, IMemoryCac
 
     private async Task<string[]> FetchAndParseTrackersAsync(Uri trackerUri)
     {
-        logger.LogDebug("Fetching tracker list from URL: {TrackerUrl}", trackerUri);
+        logger.LogDebug(
+            "Fetching tracker list from {TrackerScheme} origin {TrackerHost} on port {TrackerPort}",
+            trackerUri.Scheme,
+            trackerUri.IdnHost,
+            trackerUri.Port);
 
         var httpClient = httpClientFactory.CreateClient();
 
@@ -146,7 +152,7 @@ public class TrackerListGrabber(IHttpClientFactory httpClientFactory, IMemoryCac
                            {
                                if (!Uri.TryCreate(t, UriKind.Absolute, out var uri))
                                {
-                                   logger.LogDebug("Rejected tracker: {TrackerUrl} - Reason: Invalid format or unsupported scheme.", t);
+                                   logger.LogDebug("Rejected tracker entry: invalid format or unsupported scheme.");
                                    trackerRejectionCount++;
                                    return false;
                                }
@@ -166,7 +172,7 @@ public class TrackerListGrabber(IHttpClientFactory httpClientFactory, IMemoryCac
 
                                if (!valid)
                                {
-                                   logger.LogDebug("Enrichment tracker rejected: {TrackerUrl} - Reason: Invalid format or unsupported scheme.", t);
+                                   logger.LogDebug("Rejected tracker entry: invalid format or unsupported scheme.");
                                    trackerRejectionCount++;
                                }
 
@@ -180,9 +186,9 @@ public class TrackerListGrabber(IHttpClientFactory httpClientFactory, IMemoryCac
             catch (Exception ex)
 
             {
-                logger.LogError(ex, "Error parsing tracker list response.");
+                logger.LogError("Error parsing tracker list response ({ExceptionType}).", ex.GetType().Name);
 
-                throw new InvalidOperationException("Failed to parse tracker list response.", ex);
+                throw new InvalidOperationException("Failed to parse tracker list response.");
             }
 
             return trackers;

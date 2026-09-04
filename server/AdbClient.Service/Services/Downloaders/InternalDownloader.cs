@@ -24,8 +24,10 @@ public class InternalDownloader : IDownloader
     private readonly CancellationTokenSource _downloadCancellation = new();
     private readonly Lock _downloadCancellationLock = new();
     private readonly DownloadConfiguration _downloadConfiguration;
+    private readonly string? _downloadFileName;
     private readonly string _downloadId = Guid.NewGuid().ToString();
     private readonly DownloadService _downloadService;
+    private readonly string _downloadSource;
     private readonly string _filePath;
     private readonly Lock _lifecycleLock = new();
     private readonly ILogger _logger;
@@ -66,7 +68,12 @@ public class InternalDownloader : IDownloader
         bool updateDynamicSettings)
     {
         _logger = Log.ForContext<InternalDownloader>();
-        _logger.Debug("Instantiated new Internal Downloader for URI {Uri} to filePath {FilePath}", uri, filePath);
+        _downloadFileName = Path.GetFileName(filePath);
+        _downloadSource = Logger.DescribeDownloadSource(uri, _downloadFileName);
+        _logger.Debug(
+            "Instantiated new Internal Downloader for {DownloadSource} to filePath {FilePath}",
+            _downloadSource,
+            filePath);
 
         _uri = uri;
         _filePath = filePath;
@@ -91,7 +98,7 @@ public class InternalDownloader : IDownloader
             }
 
             _lifecycleState = LifecycleRunning;
-            _logger.Debug("Starting download of {Uri}, writing to path: {FilePath}", _uri, _filePath);
+            _logger.Debug("Starting {DownloadSource}, writing to path: {FilePath}", _downloadSource, _filePath);
 
             _settingsTask = _updateDynamicSettings ? StartSettingsTimer() : Task.CompletedTask;
             _downloadTask = RunDownloadAsync();
@@ -102,7 +109,7 @@ public class InternalDownloader : IDownloader
 
     public async Task Cancel()
     {
-        _logger.Debug("Cancelling download {Uri}", _uri);
+        _logger.Debug("Cancelling {DownloadSource}", _downloadSource);
 
         Task? downloadTask;
         var cancelBeforeStart = false;
@@ -155,7 +162,10 @@ public class InternalDownloader : IDownloader
         }
         catch (Exception ex)
         {
-            _logger.Warning(ex, "Unable to wait for downloader cancellation for {Uri}", _uri);
+            _logger.Warning(
+                "Unable to wait for downloader cancellation for {DownloadSource} ({ExceptionType})",
+                _downloadSource,
+                ex.GetType().Name);
         }
 
         if (downloadTask != null)
@@ -168,7 +178,7 @@ public class InternalDownloader : IDownloader
     {
         if (Volatile.Read(ref _lifecycleState) == LifecycleRunning && Volatile.Read(ref _terminalSignaled) == 0)
         {
-            _logger.Debug("Pausing download {Uri}", _uri);
+            _logger.Debug("Pausing {DownloadSource}", _downloadSource);
             _downloadService.Pause();
         }
 
@@ -179,7 +189,7 @@ public class InternalDownloader : IDownloader
     {
         if (Volatile.Read(ref _lifecycleState) == LifecycleRunning && Volatile.Read(ref _terminalSignaled) == 0)
         {
-            _logger.Debug("Resuming download {Uri}", _uri);
+            _logger.Debug("Resuming {DownloadSource}", _downloadSource);
             _downloadService.Resume();
         }
 
@@ -252,7 +262,7 @@ public class InternalDownloader : IDownloader
                                  });
     }
 
-    private void OnDownloadFileCompleted(object? sender, AsyncCompletedEventArgs args)
+    internal void OnDownloadFileCompleted(object? sender, AsyncCompletedEventArgs args)
     {
         string? error = null;
 
@@ -262,7 +272,7 @@ public class InternalDownloader : IDownloader
         }
         else if (args.Error != null)
         {
-            error = args.Error.Message;
+            error = Logger.DescribeDownloadFailure(args.Error, _uri, _downloadFileName);
         }
 
         CompleteOnce(error);
@@ -283,7 +293,7 @@ public class InternalDownloader : IDownloader
         }
         catch (Exception ex)
         {
-            CompleteOnce(ex.Message);
+            CompleteOnce(Logger.DescribeDownloadFailure(ex, _uri, _downloadFileName));
         }
         finally
         {
@@ -319,7 +329,10 @@ public class InternalDownloader : IDownloader
         }
         catch (Exception ex)
         {
-            _logger.Error(ex, "A download completion subscriber failed for {Uri}", _uri);
+            _logger.Error(
+                "A completion subscriber failed for {DownloadSource} ({ExceptionType})",
+                _downloadSource,
+                ex.GetType().Name);
         }
     }
 
@@ -353,7 +366,10 @@ public class InternalDownloader : IDownloader
                 }
                 catch (Exception ex)
                 {
-                    _logger.Warning(ex, "Unable to finish the download settings timer for {Uri}", _uri);
+                    _logger.Warning(
+                        "Unable to finish the settings timer for {DownloadSource} ({ExceptionType})",
+                        _downloadSource,
+                        ex.GetType().Name);
                 }
             }
 
@@ -366,7 +382,10 @@ public class InternalDownloader : IDownloader
             }
             catch (Exception ex)
             {
-                _logger.Warning(ex, "Unable to dispose downloader resources for {Uri}", _uri);
+                _logger.Warning(
+                    "Unable to dispose downloader resources for {DownloadSource} ({ExceptionType})",
+                    _downloadSource,
+                    ex.GetType().Name);
             }
 
             if (Volatile.Read(ref _terminalSucceeded) == 0)
