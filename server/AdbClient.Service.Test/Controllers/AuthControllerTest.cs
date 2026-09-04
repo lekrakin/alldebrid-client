@@ -2,6 +2,10 @@ using AdbClient.Data.Data;
 using AdbClient.Service.Services;
 using AdbClient.Web.Controllers;
 using AdbClient.Web.Models.Requests;
+using AdbClient.Web.Models.Responses;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
@@ -12,8 +16,126 @@ using Moq;
 
 namespace AdbClient.Service.Test.Controllers;
 
+[Collection(SettingsIsolationCollection.Name)]
 public class AuthControllerTest
 {
+    [Theory]
+    [InlineData("", false)]
+    [InlineData("existing-provider-key", true)]
+    public async Task Create_ReportsWhetherProviderIsAlreadyConfigured(
+        string apiKey,
+        bool expectedProviderConfigured)
+    {
+        var originalApiKey = Settings.Get.Provider.ApiKey;
+
+        try
+        {
+            Settings.Get.Provider.ApiKey = apiKey;
+
+            await using var connection = new SqliteConnection("Data Source=:memory:");
+            await connection.OpenAsync();
+            await using var dataContext = CreateDataContext(connection);
+            await dataContext.Database.EnsureCreatedAsync();
+
+            var userManager = CreateUserManager();
+            userManager.Setup(manager => manager.CreateAsync(
+                           It.Is<IdentityUser>(user => user.UserName == "new-user"),
+                           "new-password"))
+                       .ReturnsAsync(IdentityResult.Success);
+            var signInManager = CreateSignInManager(userManager.Object);
+            signInManager.Setup(manager => manager.PasswordSignInAsync(
+                              "new-user",
+                              "new-password",
+                              true,
+                              false))
+                         .ReturnsAsync(Microsoft.AspNetCore.Identity.SignInResult.Success);
+            var authentication = new Authentication(
+                signInManager.Object,
+                userManager.Object,
+                new UserData(dataContext));
+            var controller = new AuthController(authentication, null!);
+
+            var result = await controller.Create(new AuthControllerLoginRequest
+            {
+                UserName = "new-user",
+                Password = "new-password"
+            });
+
+            var ok = Assert.IsType<OkObjectResult>(result.Result);
+            var response = Assert.IsType<AuthControllerCreateResponse>(ok.Value);
+            Assert.Equal(expectedProviderConfigured, response.ProviderConfigured);
+            userManager.VerifyAll();
+            signInManager.VerifyAll();
+        }
+        finally
+        {
+            Settings.Get.Provider.ApiKey = originalApiKey;
+        }
+    }
+
+    [Fact]
+    public async Task Create_RejectsAdditionalUsersBeforeReturningProviderState()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var dataContext = CreateDataContext(connection);
+        await dataContext.Database.EnsureCreatedAsync();
+        dataContext.Users.Add(new IdentityUser("current-user"));
+        await dataContext.SaveChangesAsync();
+
+        var userManager = CreateUserManager();
+        var authentication = new Authentication(null!, userManager.Object, new UserData(dataContext));
+        var controller = new AuthController(authentication, null!);
+
+        var result = await controller.Create(new AuthControllerLoginRequest
+        {
+            UserName = "second-user",
+            Password = "new-password"
+        });
+
+        var unauthorized = Assert.IsType<StatusCodeResult>(result.Result);
+        Assert.Equal(StatusCodes.Status401Unauthorized, unauthorized.StatusCode);
+        userManager.Verify(
+            manager => manager.CreateAsync(It.IsAny<IdentityUser>(), It.IsAny<string>()),
+            Times.Never());
+    }
+
+    [Fact]
+    public async Task SetupProvider_DoesNotReplaceAnExistingApiKey()
+    {
+        const string existingApiKey = "existing-provider-key";
+        var originalApiKey = Settings.Get.Provider.ApiKey;
+
+        try
+        {
+            Settings.Get.Provider.ApiKey = existingApiKey;
+            var controller = new AuthController(null!, null!);
+
+            var result = await controller.SetupProvider(new AuthControllerSetupProviderRequest
+            {
+                Token = "replacement-provider-key"
+            });
+
+            var unauthorized = Assert.IsType<StatusCodeResult>(result);
+            Assert.Equal(StatusCodes.Status401Unauthorized, unauthorized.StatusCode);
+            Assert.Equal(existingApiKey, Settings.Get.Provider.ApiKey);
+        }
+        finally
+        {
+            Settings.Get.Provider.ApiKey = originalApiKey;
+        }
+    }
+
+    [Fact]
+    public void SetupProvider_RetainsTheAuthSettingPolicy()
+    {
+        var method = typeof(AuthController).GetMethod(nameof(AuthController.SetupProvider));
+        var attribute = Assert.Single(
+            method!.GetCustomAttributes(typeof(AuthorizeAttribute), true).Cast<AuthorizeAttribute>());
+
+        Assert.Equal("AuthSetting", attribute.Policy);
+    }
+
     [Theory]
     [InlineData("new-user", null, true, false)]
     [InlineData(null, "new-password", false, true)]
@@ -130,5 +252,17 @@ public class AuthControllerTest
             new IdentityErrorDescriber(),
             Mock.Of<IServiceProvider>(),
             Mock.Of<ILogger<UserManager<IdentityUser>>>());
+    }
+
+    private static Mock<SignInManager<IdentityUser>> CreateSignInManager(UserManager<IdentityUser> userManager)
+    {
+        return new Mock<SignInManager<IdentityUser>>(
+            userManager,
+            Mock.Of<IHttpContextAccessor>(),
+            Mock.Of<IUserClaimsPrincipalFactory<IdentityUser>>(),
+            Options.Create(new IdentityOptions()),
+            Mock.Of<ILogger<SignInManager<IdentityUser>>>(),
+            Mock.Of<IAuthenticationSchemeProvider>(),
+            Mock.Of<IUserConfirmation<IdentityUser>>());
     }
 }

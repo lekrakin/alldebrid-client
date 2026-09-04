@@ -1,6 +1,7 @@
 using AdbClient.Data.Enums;
 using AdbClient.Service.Services;
 using AdbClient.Web.Models.Requests;
+using AdbClient.Web.Models.Responses;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -37,7 +38,7 @@ public class AuthController(Authentication authentication, Settings settings) : 
     [AllowAnonymous]
     [Route("Create")]
     [HttpPost]
-    public async Task<ActionResult> Create([FromBody] AuthControllerLoginRequest? request)
+    public async Task<ActionResult<AuthControllerCreateResponse>> Create([FromBody] AuthControllerLoginRequest? request)
     {
         if (request == null)
         {
@@ -65,7 +66,8 @@ public class AuthController(Authentication authentication, Settings settings) : 
 
         await authentication.Login(request.UserName, request.Password);
 
-        return Ok();
+        return Ok(new AuthControllerCreateResponse(
+            !string.IsNullOrWhiteSpace(Settings.Get.Provider.ApiKey)));
     }
 
     [Authorize(Policy = "AuthSetting")]
