@@ -108,7 +108,7 @@ public class DownloadHelperTest
     }
 
     [Fact]
-    public void GetDownloadPath_WithoutPath_WhenDownloadLinkNull_ReturnsNull()
+    public void GetDownloadPath_WithoutPath_UsesStoredFileNameWithoutDownloadLink()
     {
         // Arrange
         var download = new Download
@@ -126,7 +126,7 @@ public class DownloadHelperTest
         var path = DownloadHelper.GetDownloadPath(torrent, download);
 
         // Assert
-        Assert.Null(path);
+        Assert.Equal(Path.Combine("Torrent Name", "file.txt"), path);
     }
 
     [Fact]

@@ -1,6 +1,8 @@
 using System.Diagnostics;
+using System.IO.Abstractions;
 using System.IO.Abstractions.TestingHelpers;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using AdbClient.Data.Data;
 using AdbClient.Data.Models.Data;
@@ -12,7 +14,11 @@ using AdbClient.Service.Wrappers;
 using AllDebridNET;
 using Microsoft.Extensions.Logging;
 using Moq;
+using DownloadClientKind = AdbClient.Data.Enums.DownloadClient;
+using TorrentFinishedAction = AdbClient.Data.Enums.TorrentFinishedAction;
+using TorrentHostDownloadAction = AdbClient.Data.Enums.TorrentHostDownloadAction;
 using TorrentsService = AdbClient.Service.Services.Torrents;
+using TorrentStatus = AdbClient.Data.Enums.TorrentStatus;
 
 namespace AdbClient.Service.Test.Services;
 
@@ -51,6 +57,9 @@ class Mocks
 
 public class TorrentsTest
 {
+    private const string ExistingHash = "0123456789abcdef0123456789abcdef01234567";
+    private const string ExistingMagnet = $"magnet:?xt=urn:btih:{ExistingHash}";
+
     [Theory]
     [InlineData(true, "include")]
     [InlineData(true, "exclude")]
@@ -77,6 +86,662 @@ public class TorrentsTest
         Assert.Equal(filterName, exception.ParamName);
         mocks.EnricherMock.VerifyNoOtherCalls();
         mocks.TorrentDataMock.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task AddMagnet_VisibleSameHashRemainsIdempotent()
+    {
+        var existing = CreateRetainedTorrent(completed: true);
+        existing.QbittorrentHidden = false;
+        var mocks = CreateMocksForExistingTorrent(existing);
+        var service = CreateService(mocks);
+
+        var result = await service.AddMagnetToDebridQueue(
+            ExistingMagnet,
+            new Torrent { Category = existing.Category });
+
+        Assert.Same(existing, result);
+        mocks.TorrentDataMock.Verify(
+            data => data.ReactivateFromQbittorrent(
+                It.IsAny<Guid>(),
+                It.IsAny<Torrent>(),
+                It.IsAny<IReadOnlySet<Guid>?>(),
+                It.IsAny<bool>()),
+            Times.Never);
+        mocks.TorrentDataMock.Verify(
+            data => data.Add(
+                It.IsAny<string?>(),
+                It.IsAny<string>(),
+                It.IsAny<string?>(),
+                It.IsAny<bool>(),
+                It.IsAny<DownloadClientKind>(),
+                It.IsAny<Torrent>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task AddMagnet_HiddenTorrentInDifferentCategoryIsRejected()
+    {
+        var existing = CreateRetainedTorrent(completed: true);
+        var mocks = CreateMocksForExistingTorrent(existing);
+        var service = CreateService(mocks);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.AddMagnetToDebridQueue(
+                ExistingMagnet,
+                new Torrent { Category = "sonarr" }));
+
+        Assert.Contains("different category", exception.Message, StringComparison.Ordinal);
+        mocks.TorrentDataMock.Verify(
+            data => data.ReactivateFromQbittorrent(
+                It.IsAny<Guid>(),
+                It.IsAny<Torrent>(),
+                It.IsAny<IReadOnlySet<Guid>?>(),
+                It.IsAny<bool>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task AddMagnet_HiddenIncompleteTorrentIsOnlyUnhidden()
+    {
+        var existing = CreateRetainedTorrent(completed: false);
+        var mocks = CreateMocksForExistingTorrent(existing);
+        SetupReactivation(mocks, existing);
+        var service = CreateService(mocks);
+
+        var result = await service.AddMagnetToDebridQueue(
+            ExistingMagnet,
+            new Torrent { Category = existing.Category });
+
+        Assert.False(result.QbittorrentHidden);
+        mocks.TorrentDataMock.Verify(
+            data => data.ReactivateFromQbittorrent(
+                existing.TorrentId,
+                It.IsAny<Torrent>(),
+                null,
+                false),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task AddMagnet_HiddenActiveTorrentIsOnlyUnhidden()
+    {
+        var existing = CreateRetainedTorrent(completed: true);
+        var download = new Download
+        {
+            DownloadId = Guid.NewGuid(),
+            TorrentId = existing.TorrentId,
+            Torrent = existing,
+            Path = "https://example.invalid/restricted",
+            Link = "https://example.invalid/file.zip",
+            FileName = "file.zip"
+        };
+        existing.Downloads.Add(download);
+        var activeClient = new UnpackClient(download, existing.LocalDownloadPath!);
+        var mocks = CreateMocksForExistingTorrent(existing);
+        SetupReactivation(mocks, existing);
+        var service = CreateService(mocks);
+
+        try
+        {
+            TorrentRunner.ActiveUnpackClients[download.DownloadId] = activeClient;
+
+            await service.AddMagnetToDebridQueue(
+                ExistingMagnet,
+                new Torrent { Category = existing.Category });
+
+            mocks.TorrentDataMock.Verify(
+                data => data.ReactivateFromQbittorrent(
+                    existing.TorrentId,
+                    It.IsAny<Torrent>(),
+                    null,
+                    false),
+                Times.Once);
+        }
+        finally
+        {
+            activeClient.Cancel();
+            TorrentRunner.ActiveUnpackClients.TryRemove(download.DownloadId, out _);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AddMagnet_HiddenCompletedTorrentWithNestedPayloadPreservesDownloads(bool parentError)
+    {
+        var existing = CreateRetainedTorrent(completed: true);
+        existing.Error = parentError ? "completion failed" : null;
+        AddExpectedDownload(existing, "payload.mkv");
+        existing.RdFiles = JsonSerializer.Serialize(new[] { new { Path = "nested/payload.mkv" } });
+        var jobRoot = Path.Combine(
+            existing.LocalDownloadPath!,
+            existing.Category!,
+            existing.RdName!);
+        var fileSystem = new MockFileSystem(new Dictionary<string, MockFileData>
+        {
+            [Path.Combine(jobRoot, "nested", "payload.mkv")] = new("payload")
+        });
+        var mocks = CreateMocksForExistingTorrent(existing);
+        SetupReactivation(mocks, existing);
+        var service = CreateService(mocks, fileSystem: fileSystem);
+
+        await service.AddMagnetToDebridQueue(
+            ExistingMagnet,
+            new Torrent { Category = existing.Category });
+
+        mocks.TorrentDataMock.Verify(
+            data => data.ReactivateFromQbittorrent(
+                existing.TorrentId,
+                It.IsAny<Torrent>(),
+                It.Is<IReadOnlySet<Guid>?>(ids => parentError ? ids != null && ids.Count == 0 : ids == null),
+                false),
+            Times.Once);
+        mocks.AllDebridMagnetsMock.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AddMagnet_HiddenTorrentRequeuesMissingFilesWithoutCountingSidecars(bool retainFirstFile)
+    {
+        var existing = CreateRetainedTorrent(completed: true);
+        var first = AddExpectedDownload(existing, "first.mkv");
+        var second = AddExpectedDownload(existing, "second.mkv");
+        var jobRoot = Path.Combine(existing.LocalDownloadPath!, existing.Category!, existing.RdName!);
+        var fileSystem = new MockFileSystem(new Dictionary<string, MockFileData>
+        {
+            [Path.Combine(jobRoot, "release.nfo")] = new("metadata")
+        });
+        if (retainFirstFile)
+        {
+            fileSystem.AddFile(Path.Combine(jobRoot, "first.mkv"), new("payload"));
+        }
+        var originalFiles = fileSystem.AllFiles.ToArray();
+        var originalDirectories = fileSystem.AllDirectories.ToArray();
+        var mocks = CreateMocksForExistingTorrent(existing);
+        SetupReactivation(mocks, existing);
+        var service = CreateService(mocks, fileSystem: fileSystem);
+
+        await service.AddMagnetToDebridQueue(ExistingMagnet, new Torrent { Category = existing.Category });
+        await service.AddMagnetToDebridQueue(ExistingMagnet, new Torrent { Category = existing.Category });
+
+        mocks.TorrentDataMock.Verify(data => data.ReactivateFromQbittorrent(
+            existing.TorrentId,
+            It.IsAny<Torrent>(),
+            It.Is<IReadOnlySet<Guid>?>(ids => ids != null && ids.Contains(second.DownloadId) &&
+                ids.Contains(first.DownloadId) == !retainFirstFile && ids.Count == (retainFirstFile ? 1 : 2)),
+            false), Times.Once);
+        mocks.AllDebridMagnetsMock.VerifyNoOtherCalls();
+        Assert.Equal(originalFiles, fileSystem.AllFiles);
+        Assert.Equal(originalDirectories, fileSystem.AllDirectories);
+    }
+
+    [Theory]
+    [InlineData(false, null)]
+    [InlineData(true, "download failed")]
+    public async Task AddMagnet_ExistingUnfinishedOrFailedFileIsRequeued(bool completed, string? error)
+    {
+        var existing = CreateRetainedTorrent(completed: true);
+        var download = AddExpectedDownload(existing, "payload.mkv");
+        download.Completed = completed ? DateTimeOffset.UtcNow : null;
+        download.Error = error;
+        var fileSystem = new MockFileSystem(new Dictionary<string, MockFileData>
+        {
+            [Path.Combine(existing.LocalDownloadPath!, existing.Category!, existing.RdName!, "payload.mkv")] = new("partial")
+        });
+        var mocks = CreateMocksForExistingTorrent(existing);
+        SetupReactivation(mocks, existing);
+
+        await CreateService(mocks, fileSystem: fileSystem).AddMagnetToDebridQueue(
+            ExistingMagnet, new Torrent { Category = existing.Category });
+
+        mocks.TorrentDataMock.Verify(data => data.ReactivateFromQbittorrent(
+            existing.TorrentId,
+            It.IsAny<Torrent>(),
+            It.Is<IReadOnlySet<Guid>?>(ids => ids != null && ids.SetEquals(new[] { download.DownloadId })),
+            false), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AddMagnet_LegacyRetainedTorrentUsesIncomingMetadataWhenProviderNeedsRetry(bool providerError)
+    {
+        var existing = CreateRetainedTorrent(completed: true);
+        existing.FileOrMagnet = null;
+        existing.RdId = providerError ? "provider-id" : null;
+        existing.RdStatus = providerError ? TorrentStatus.Error : TorrentStatus.Finished;
+        var mocks = CreateMocksForExistingTorrent(existing);
+        SetupReactivation(mocks, existing);
+
+        await CreateService(mocks).AddMagnetToDebridQueue(ExistingMagnet, new Torrent { Category = existing.Category });
+
+        mocks.TorrentDataMock.Verify(data => data.ReactivateFromQbittorrent(
+            existing.TorrentId,
+            It.Is<Torrent>(requested => requested.FileOrMagnet == ExistingMagnet && !requested.IsFile),
+            It.Is<IReadOnlySet<Guid>?>(ids => ids != null),
+            providerError), Times.Once);
+        mocks.AllDebridMagnetsMock.Verify(magnets => magnets.DeleteAsync(
+            "provider-id", It.IsAny<CancellationToken>()), providerError ? Times.Once() : Times.Never());
+    }
+
+    [Fact]
+    public async Task AddFile_LegacyRetainedTorrentUsesIncomingTorrentMetadata()
+    {
+        var bytes = Encoding.ASCII.GetBytes(
+            "d4:infod6:lengthi1e4:name11:episode.mkv12:piece lengthi16384e6:pieces20:00000000000000000000ee");
+        var parsed = await MonoTorrent.Torrent.LoadAsync(bytes);
+        var existing = CreateRetainedTorrent(completed: true);
+        existing.Hash = parsed.InfoHashes.V1OrV2.ToHex();
+        existing.FileOrMagnet = null;
+        existing.RdId = null;
+        var mocks = new Mocks();
+        mocks.EnricherMock.Setup(value => value.EnrichTorrentBytes(bytes)).ReturnsAsync(bytes);
+        mocks.TorrentDataMock.Setup(data => data.GetByHash(existing.Hash)).ReturnsAsync(existing);
+        SetupReactivation(mocks, existing);
+
+        await CreateService(mocks).AddFileToDebridQueue(bytes, new Torrent { Category = existing.Category });
+
+        mocks.TorrentDataMock.Verify(data => data.ReactivateFromQbittorrent(
+            existing.TorrentId,
+            It.Is<Torrent>(requested => requested.FileOrMagnet == Convert.ToBase64String(bytes) && requested.IsFile),
+            It.Is<IReadOnlySet<Guid>?>(ids => ids != null),
+            false), Times.Once);
+        mocks.AllDebridMagnetsMock.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task AddMagnet_ExpectedPayloadReparsePointIsRejectedWithoutMutation()
+    {
+        var existing = CreateRetainedTorrent(completed: true);
+        AddExpectedDownload(existing, "payload.mkv");
+        var path = Path.Combine(existing.LocalDownloadPath!, existing.Category!, existing.RdName!, "payload.mkv");
+        var fileSystem = new MockFileSystem(new Dictionary<string, MockFileData>
+        {
+            [path] = new("payload")
+        });
+        fileSystem.File.SetAttributes(path, FileAttributes.ReparsePoint);
+        var mocks = CreateMocksForExistingTorrent(existing);
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => CreateService(mocks, fileSystem: fileSystem)
+            .AddMagnetToDebridQueue(ExistingMagnet, new Torrent { Category = existing.Category }));
+
+        Assert.True(existing.QbittorrentHidden);
+        mocks.TorrentDataMock.Verify(data => data.ReactivateFromQbittorrent(
+            It.IsAny<Guid>(), It.IsAny<Torrent>(), It.IsAny<IReadOnlySet<Guid>?>(), It.IsAny<bool>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AddMagnet_HiddenTerminalErrorWithPartialPayloadIsReset(bool providerError)
+    {
+        var existing = CreateRetainedTorrent(completed: true);
+        existing.Error = providerError ? null : "local download failed";
+        existing.RdStatus = providerError ? TorrentStatus.Error : TorrentStatus.Finished;
+        var jobRoot = Path.Combine(
+            existing.LocalDownloadPath!,
+            existing.Category!,
+            existing.RdName!);
+        var fileSystem = new MockFileSystem(new Dictionary<string, MockFileData>
+        {
+            [Path.Combine(jobRoot, "partial.mkv")] = new("partial")
+        });
+        var mocks = CreateMocksForExistingTorrent(existing);
+        mocks.TorrentDataMock.Setup(data => data.ReactivateFromQbittorrent(
+                                  existing.TorrentId,
+                                  It.IsAny<Torrent>(),
+                                  It.Is<IReadOnlySet<Guid>?>(ids => ids != null),
+                                  providerError))
+             .Callback(() =>
+             {
+                 existing.QbittorrentHidden = false;
+                 existing.Error = null;
+
+                 if (providerError)
+                 {
+                     existing.RdId = null;
+                     existing.RdStatus = TorrentStatus.Queued;
+                 }
+             })
+             .ReturnsAsync(existing);
+        var service = CreateService(mocks, fileSystem: fileSystem);
+
+        var result = await service.AddMagnetToDebridQueue(
+            ExistingMagnet,
+            new Torrent { Category = existing.Category });
+
+        Assert.False(result.QbittorrentHidden);
+        Assert.Null(result.Error);
+        mocks.TorrentDataMock.Verify(
+            data => data.ReactivateFromQbittorrent(
+                existing.TorrentId,
+                It.IsAny<Torrent>(),
+                It.Is<IReadOnlySet<Guid>?>(ids => ids != null),
+                providerError),
+            Times.Once);
+        mocks.AllDebridMagnetsMock.Verify(
+            magnets => magnets.DeleteAsync(
+                existing.RdId ?? "provider-id",
+                It.IsAny<CancellationToken>()),
+            providerError ? Times.Once() : Times.Never());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AddMagnet_HiddenCompletedTorrentWithoutPayloadIsReset(bool createEmptyDirectories)
+    {
+        var existing = CreateRetainedTorrent(completed: true);
+        var fileSystem = new MockFileSystem();
+
+        if (createEmptyDirectories)
+        {
+            fileSystem.AddDirectory(Path.Combine(
+                existing.LocalDownloadPath!,
+                existing.Category!,
+                existing.RdName!,
+                "empty",
+                "nested"));
+        }
+
+        var mocks = CreateMocksForExistingTorrent(existing);
+        SetupReactivation(mocks, existing);
+        var service = CreateService(mocks, fileSystem: fileSystem);
+        var requested = new Torrent
+        {
+            Category = existing.Category,
+            HostDownloadAction = TorrentHostDownloadAction.DownloadNone,
+            FinishedAction = TorrentFinishedAction.RemoveClient,
+            DownloadRetryAttempts = 7
+        };
+
+        await service.AddMagnetToDebridQueue(ExistingMagnet, requested);
+
+        mocks.TorrentDataMock.Verify(
+            data => data.ReactivateFromQbittorrent(
+                existing.TorrentId,
+                It.Is<Torrent>(torrent =>
+                    torrent.HostDownloadAction == TorrentHostDownloadAction.DownloadNone &&
+                    torrent.FinishedAction == TorrentFinishedAction.RemoveClient &&
+                    torrent.DownloadRetryAttempts == 7),
+                It.Is<IReadOnlySet<Guid>?>(ids => ids != null),
+                false),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task AddMagnet_HiddenCompletedTorrentWithUnsafePathIsRejectedWithoutMutation()
+    {
+        var existing = CreateRetainedTorrent(completed: true);
+        existing.Category = "../outside";
+        var mocks = CreateMocksForExistingTorrent(existing);
+        var service = CreateService(mocks);
+
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            service.AddMagnetToDebridQueue(
+                ExistingMagnet,
+                new Torrent { Category = existing.Category }));
+
+        Assert.True(existing.QbittorrentHidden);
+        mocks.TorrentDataMock.Verify(
+            data => data.ReactivateFromQbittorrent(
+                It.IsAny<Guid>(),
+                It.IsAny<Torrent>(),
+                It.IsAny<IReadOnlySet<Guid>?>(),
+                It.IsAny<bool>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task AddMagnet_HiddenCompletedLegacyTorrentWithoutCapturedPathIsNotGuessed()
+    {
+        var existing = CreateRetainedTorrent(completed: true);
+        existing.LocalDownloadPath = null;
+        var mocks = CreateMocksForExistingTorrent(existing);
+        var service = CreateService(mocks);
+
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(() =>
+            service.AddMagnetToDebridQueue(
+                ExistingMagnet,
+                new Torrent { Category = existing.Category }));
+
+        Assert.Contains("no captured local download path", exception.Message, StringComparison.Ordinal);
+        Assert.True(existing.QbittorrentHidden);
+        mocks.TorrentDataMock.Verify(
+            data => data.ReactivateFromQbittorrent(
+                It.IsAny<Guid>(),
+                It.IsAny<Torrent>(),
+                It.IsAny<IReadOnlySet<Guid>?>(),
+                It.IsAny<bool>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task AddMagnet_HiddenCompletedTorrentWithReparsePointIsRejectedWithoutMutation()
+    {
+        var existing = CreateRetainedTorrent(completed: true);
+        var jobRoot = Path.Combine(
+            existing.LocalDownloadPath!,
+            existing.Category!,
+            existing.RdName!);
+        var fileSystem = new MockFileSystem();
+        fileSystem.AddDirectory(jobRoot);
+        fileSystem.File.SetAttributes(
+            jobRoot,
+            fileSystem.File.GetAttributes(jobRoot) | FileAttributes.ReparsePoint);
+        var mocks = CreateMocksForExistingTorrent(existing);
+        var service = CreateService(mocks, fileSystem: fileSystem);
+
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            service.AddMagnetToDebridQueue(
+                ExistingMagnet,
+                new Torrent { Category = existing.Category }));
+
+        Assert.True(existing.QbittorrentHidden);
+        mocks.TorrentDataMock.Verify(
+            data => data.ReactivateFromQbittorrent(
+                It.IsAny<Guid>(),
+                It.IsAny<Torrent>(),
+                It.IsAny<IReadOnlySet<Guid>?>(),
+                It.IsAny<bool>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task AddMagnet_HiddenCompletedTorrentWithUnreadablePathIsRejectedWithoutMutation()
+    {
+        var existing = CreateRetainedTorrent(completed: true);
+        var baseFileSystem = new MockFileSystem();
+        var file = new Mock<IFile>();
+        file.Setup(value => value.GetAttributes(It.IsAny<string>()))
+            .Throws(new UnauthorizedAccessException("denied"));
+        var fileSystem = new Mock<IFileSystem>();
+        fileSystem.SetupGet(value => value.Path).Returns(baseFileSystem.Path);
+        fileSystem.SetupGet(value => value.Directory).Returns(baseFileSystem.Directory);
+        fileSystem.SetupGet(value => value.File).Returns(file.Object);
+        var mocks = CreateMocksForExistingTorrent(existing);
+        var service = CreateService(mocks, fileSystem: fileSystem.Object);
+
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            service.AddMagnetToDebridQueue(
+                ExistingMagnet,
+                new Torrent { Category = existing.Category }));
+
+        Assert.True(existing.QbittorrentHidden);
+        mocks.TorrentDataMock.Verify(
+            data => data.ReactivateFromQbittorrent(
+                It.IsAny<Guid>(),
+                It.IsAny<Torrent>(),
+                It.IsAny<IReadOnlySet<Guid>?>(),
+                It.IsAny<bool>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task AddMagnet_ConcurrentHiddenRetriesReactivateOnce()
+    {
+        var existing = CreateRetainedTorrent(completed: true);
+        var mocks = CreateMocksForExistingTorrent(existing);
+        mocks.TorrentDataMock.Setup(data => data.ReactivateFromQbittorrent(
+                                  existing.TorrentId,
+                                  It.IsAny<Torrent>(),
+                                  It.Is<IReadOnlySet<Guid>?>(ids => ids != null),
+                                  false))
+                             .Returns(async () =>
+                             {
+                                 await Task.Delay(25);
+                                 existing.QbittorrentHidden = false;
+                                 return existing;
+                             });
+        var service = CreateService(mocks);
+
+        await Task.WhenAll(
+            service.AddMagnetToDebridQueue(
+                ExistingMagnet,
+                new Torrent { Category = existing.Category }),
+            service.AddMagnetToDebridQueue(
+                ExistingMagnet,
+                new Torrent { Category = existing.Category }));
+
+        mocks.TorrentDataMock.Verify(
+            data => data.ReactivateFromQbittorrent(
+                existing.TorrentId,
+                It.IsAny<Torrent>(),
+                It.Is<IReadOnlySet<Guid>?>(ids => ids != null),
+                false),
+            Times.Once);
+        mocks.TorrentDataMock.Verify(
+            data => data.Add(
+                It.IsAny<string?>(),
+                It.IsAny<string>(),
+                It.IsAny<string?>(),
+                It.IsAny<bool>(),
+                It.IsAny<DownloadClientKind>(),
+                It.IsAny<Torrent>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task AddMagnet_WaitsForConcurrentQbittorrentDeletionThenReactivates()
+    {
+        var existing = CreateRetainedTorrent(completed: true);
+        existing.QbittorrentHidden = false;
+        var deletionStarted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var allowDeletion = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var mocks = CreateMocksForExistingTorrent(existing);
+        mocks.TorrentDataMock.Setup(data => data.GetById(existing.TorrentId))
+             .ReturnsAsync(existing);
+        mocks.TorrentDataMock.Setup(data => data.FinalizeRetainedDeletion(
+                                  existing.TorrentId,
+                                  true,
+                                  false,
+                                  false))
+             .Returns(async () =>
+             {
+                 deletionStarted.TrySetResult();
+                 await allowDeletion.Task;
+                 existing.QbittorrentHidden = true;
+             });
+        SetupReactivation(mocks, existing);
+        var service = CreateService(mocks);
+
+        try
+        {
+            var deletion = service.Delete(existing.TorrentId, false, false, false, true);
+            await deletionStarted.Task.WaitAsync(TimeSpan.FromSeconds(1));
+
+            var addition = service.AddMagnetToDebridQueue(
+                ExistingMagnet,
+                new Torrent { Category = existing.Category });
+            var earlyCompletion = await Task.WhenAny(addition, Task.Delay(50));
+
+            Assert.NotSame(addition, earlyCompletion);
+
+            allowDeletion.TrySetResult();
+            await Task.WhenAll(deletion, addition);
+
+            Assert.False(existing.QbittorrentHidden);
+            mocks.TorrentDataMock.Verify(
+                data => data.ReactivateFromQbittorrent(
+                    existing.TorrentId,
+                    It.IsAny<Torrent>(),
+                    It.Is<IReadOnlySet<Guid>?>(ids => ids != null),
+                    false),
+                Times.Once);
+        }
+        finally
+        {
+            allowDeletion.TrySetResult();
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AddMagnet_WaitsForConcurrentCategoryMutationThenRejects(bool fullUpdate)
+    {
+        var existing = CreateRetainedTorrent(completed: false);
+        existing.QbittorrentHidden = false;
+        var mutationStarted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var allowMutation = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var mocks = CreateMocksForExistingTorrent(existing);
+
+        async Task ApplyCategoryMutation()
+        {
+            mutationStarted.TrySetResult();
+            await allowMutation.Task;
+            existing.Category = "sonarr";
+        }
+
+        mocks.TorrentDataMock.Setup(data => data.UpdateCategory(existing.TorrentId, "sonarr"))
+             .Returns(ApplyCategoryMutation);
+        mocks.TorrentDataMock.Setup(data => data.Update(It.Is<Torrent>(torrent =>
+                                  torrent.TorrentId == existing.TorrentId &&
+                                  torrent.Category == "sonarr")))
+             .Returns(ApplyCategoryMutation);
+        var service = CreateService(mocks);
+
+        try
+        {
+            Task mutation = fullUpdate
+                ? service.Update(new Torrent
+                {
+                    TorrentId = existing.TorrentId,
+                    Category = "sonarr"
+                })
+                : service.UpdateCategory(existing.Hash, "sonarr");
+            await mutationStarted.Task.WaitAsync(TimeSpan.FromSeconds(1));
+
+            var addition = service.AddMagnetToDebridQueue(
+                ExistingMagnet,
+                new Torrent { Category = "radarr" });
+            var earlyCompletion = await Task.WhenAny(addition, Task.Delay(50));
+
+            Assert.NotSame(addition, earlyCompletion);
+
+            allowMutation.TrySetResult();
+            await mutation;
+
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => addition);
+            Assert.Contains("different category", exception.Message, StringComparison.Ordinal);
+            mocks.TorrentDataMock.Verify(
+                data => data.ReactivateFromQbittorrent(
+                    It.IsAny<Guid>(),
+                    It.IsAny<Torrent>(),
+                    It.IsAny<IReadOnlySet<Guid>?>(),
+                    It.IsAny<bool>()),
+                Times.Never);
+        }
+        finally
+        {
+            allowMutation.TrySetResult();
+        }
     }
 
     public static TheoryData<Torrent, List<Download>> TorrentAndDownload()
@@ -810,10 +1475,65 @@ public class TorrentsTest
         return (torrent, download, mocks);
     }
 
+    private static Torrent CreateRetainedTorrent(bool completed)
+    {
+        return new()
+        {
+            TorrentId = Guid.NewGuid(),
+            Hash = ExistingHash,
+            Category = "radarr",
+            LocalDownloadPath = Path.GetFullPath(Path.Combine(
+                Path.GetTempPath(),
+                "adbclient-qbittorrent-reactivation")),
+            RdId = "provider-id",
+            RdName = "retained-job",
+            RdStatus = TorrentStatus.Finished,
+            FileOrMagnet = ExistingMagnet,
+            Completed = completed ? DateTimeOffset.UtcNow : null,
+            QbittorrentHidden = true
+        };
+    }
+
+    private static Download AddExpectedDownload(Torrent torrent, string fileName)
+    {
+        var download = new Download
+        {
+            DownloadId = Guid.NewGuid(),
+            TorrentId = torrent.TorrentId,
+            Path = "https://example.invalid/restricted",
+            FileName = fileName,
+            Completed = DateTimeOffset.UtcNow
+        };
+        torrent.Downloads.Add(download);
+        return download;
+    }
+
+    private static Mocks CreateMocksForExistingTorrent(Torrent torrent)
+    {
+        var mocks = new Mocks();
+        mocks.EnricherMock.Setup(value => value.EnrichMagnetLink(ExistingMagnet))
+             .ReturnsAsync(ExistingMagnet);
+        mocks.TorrentDataMock.Setup(data => data.GetByHash(It.Is<string>(hash =>
+                                     hash.Equals(ExistingHash, StringComparison.OrdinalIgnoreCase))))
+             .ReturnsAsync(torrent);
+        return mocks;
+    }
+
+    private static void SetupReactivation(Mocks mocks, Torrent torrent)
+    {
+        mocks.TorrentDataMock.Setup(data => data.ReactivateFromQbittorrent(
+                                  torrent.TorrentId,
+                                  It.IsAny<Torrent>(),
+                                  It.IsAny<IReadOnlySet<Guid>?>(),
+                                  It.IsAny<bool>()))
+             .Callback(() => torrent.QbittorrentHidden = false)
+             .ReturnsAsync(torrent);
+    }
+
     private static TorrentsService CreateService(
         Mocks mocks,
         TimeSpan? activeClientStopTimeout = null,
-        MockFileSystem? fileSystem = null)
+        IFileSystem? fileSystem = null)
     {
         var torrentClient = new AllDebridTorrentClient(
             Mock.Of<ILogger<AllDebridTorrentClient>>(),

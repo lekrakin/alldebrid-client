@@ -28,7 +28,12 @@ public interface ITorrentData
     Task FinalizeRetainedDeletion(
         Guid torrentId,
         bool hideFromQbittorrent,
-        bool consumeFinishedAction,
+        bool providerDeleted,
         bool markAsDeleted);
+    Task<Torrent?> ReactivateFromQbittorrent(
+        Guid torrentId,
+        Torrent requestedDefaults,
+        IReadOnlySet<Guid>? downloadsToReset,
+        bool providerDeleted);
     Task Delete(Guid torrentId);
 }

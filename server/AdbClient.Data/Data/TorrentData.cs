@@ -205,7 +205,7 @@ public class TorrentData(DataContext dataContext) : ITorrentData
     public Task FinalizeRetainedDeletion(
         Guid torrentId,
         bool hideFromQbittorrent,
-        bool consumeFinishedAction,
+        bool providerDeleted,
         bool markAsDeleted) =>
         Patch(torrentId, db =>
         {
@@ -214,9 +214,10 @@ public class TorrentData(DataContext dataContext) : ITorrentData
                 db.QbittorrentHidden = true;
             }
 
-            if (consumeFinishedAction)
+            if (providerDeleted)
             {
                 db.FinishedAction = TorrentFinishedAction.None;
+                db.RdId = null;
             }
 
             if (markAsDeleted)
@@ -226,6 +227,141 @@ public class TorrentData(DataContext dataContext) : ITorrentData
                 db.Retry = null;
             }
         });
+
+    public async Task<Torrent?> ReactivateFromQbittorrent(
+        Guid torrentId,
+        Torrent requestedDefaults,
+        IReadOnlySet<Guid>? downloadsToReset,
+        bool providerDeleted)
+    {
+        var dbTorrent = await dataContext.Torrents
+                                         .Include(torrent => torrent.Downloads)
+                                         .FirstOrDefaultAsync(torrent => torrent.TorrentId == torrentId);
+
+        if (dbTorrent == null)
+        {
+            return null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(requestedDefaults.Category) &&
+            !string.Equals(dbTorrent.Category, requestedDefaults.Category, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"Torrent {dbTorrent.Hash} already exists under a different category.");
+        }
+
+        if (!dbTorrent.QbittorrentHidden)
+        {
+            return dbTorrent;
+        }
+
+        Download[] discardedDownloads = [];
+
+        if (downloadsToReset != null)
+        {
+            var fileOrMagnet = string.IsNullOrWhiteSpace(dbTorrent.FileOrMagnet)
+                ? requestedDefaults.FileOrMagnet
+                : dbTorrent.FileOrMagnet;
+
+            if ((providerDeleted || dbTorrent.RdId == null) &&
+                string.IsNullOrWhiteSpace(fileOrMagnet))
+            {
+                throw new InvalidOperationException(
+                    "The retained torrent cannot be requeued because its original torrent metadata is unavailable.");
+            }
+
+            var now = DateTimeOffset.UtcNow;
+
+            if (string.IsNullOrWhiteSpace(dbTorrent.FileOrMagnet))
+            {
+                dbTorrent.FileOrMagnet = fileOrMagnet;
+                dbTorrent.IsFile = requestedDefaults.IsFile;
+            }
+
+            dbTorrent.Added = now;
+            dbTorrent.Completed = null;
+            dbTorrent.Error = null;
+            dbTorrent.Retry = null;
+            dbTorrent.RetryCount = 0;
+            dbTorrent.DownloadClient = requestedDefaults.DownloadClient;
+            dbTorrent.HostDownloadAction = requestedDefaults.HostDownloadAction;
+            dbTorrent.DownloadAction = requestedDefaults.DownloadAction;
+            dbTorrent.FinishedAction = requestedDefaults.FinishedAction;
+            dbTorrent.FinishedActionDelay = requestedDefaults.FinishedActionDelay;
+            dbTorrent.DownloadMinSize = requestedDefaults.DownloadMinSize;
+            dbTorrent.IncludeRegex = requestedDefaults.IncludeRegex;
+            dbTorrent.ExcludeRegex = requestedDefaults.ExcludeRegex;
+            dbTorrent.DownloadManualFiles = requestedDefaults.DownloadManualFiles;
+            dbTorrent.TorrentRetryAttempts = requestedDefaults.TorrentRetryAttempts;
+            dbTorrent.DownloadRetryAttempts = requestedDefaults.DownloadRetryAttempts;
+            dbTorrent.DeleteOnError = requestedDefaults.DeleteOnError;
+            dbTorrent.Lifetime = requestedDefaults.Lifetime;
+            dbTorrent.Priority = requestedDefaults.Priority;
+
+            if (providerDeleted)
+            {
+                dbTorrent.RdId = null;
+            }
+
+            if (dbTorrent.RdId == null)
+            {
+                dbTorrent.FilesSelected = null;
+                dbTorrent.RdAdded = null;
+                dbTorrent.RdEnded = null;
+                dbTorrent.RdProgress = null;
+                dbTorrent.RdSpeed = null;
+                dbTorrent.RdSeeders = null;
+                dbTorrent.RdFiles = null;
+                dbTorrent.RdStatus = TorrentStatus.Queued;
+                dbTorrent.RdStatusRaw = null;
+                discardedDownloads = dbTorrent.Downloads.ToArray();
+                dataContext.Downloads.RemoveRange(discardedDownloads);
+            }
+            else if (requestedDefaults.HostDownloadAction == TorrentHostDownloadAction.DownloadNone)
+            {
+                discardedDownloads = dbTorrent.Downloads
+                                              .Where(download => downloadsToReset.Contains(download.DownloadId))
+                                              .ToArray();
+                dataContext.Downloads.RemoveRange(discardedDownloads);
+            }
+            else
+            {
+                if (dbTorrent.Downloads.Count == 0)
+                {
+                    dbTorrent.FilesSelected = null;
+                }
+
+                foreach (var download in dbTorrent.Downloads.Where(download => downloadsToReset.Contains(download.DownloadId)))
+                {
+                    download.Added = now;
+                    download.DownloadQueued = now;
+                    download.DownloadStarted = null;
+                    download.DownloadFinished = null;
+                    download.UnpackingQueued = null;
+                    download.UnpackingStarted = null;
+                    download.UnpackingFinished = null;
+                    download.Completed = null;
+                    download.Error = null;
+                    download.RetryCount = 0;
+                    download.Link = null;
+                    download.RemoteId = null;
+                }
+            }
+        }
+
+        dbTorrent.QbittorrentHidden = false;
+
+        await dataContext.SaveChangesAsync();
+
+        foreach (var download in discardedDownloads)
+        {
+            dbTorrent.Downloads.Remove(download);
+        }
+
+        await VoidCache();
+
+        return dbTorrent;
+    }
 
     public async Task Delete(Guid torrentId)
     {

@@ -87,19 +87,36 @@ public class Torrents(
 
     public async Task UpdateCategory(string hash, string? category)
     {
-        var torrent = await torrentData.GetByHash(hash);
+        await TorrentAddLock.WaitAsync();
 
-        if (torrent == null)
+        try
         {
-            return;
+            var torrent = await torrentData.GetByHash(hash);
+
+            if (torrent == null)
+            {
+                return;
+            }
+
+            Log($"Update category to {category}", torrent);
+
+            await torrentData.UpdateCategory(torrent.TorrentId, category);
         }
-
-        Log($"Update category to {category}", torrent);
-
-        await torrentData.UpdateCategory(torrent.TorrentId, category);
+        finally
+        {
+            TorrentAddLock.Release();
+        }
     }
 
-    public async Task<Torrent> AddMagnetToDebridQueue(string magnetLink, Torrent torrent)
+    public Task<Torrent> AddMagnetToDebridQueue(string magnetLink, Torrent torrent)
+    {
+        return AddMagnetToDebridQueue(magnetLink, torrent, false);
+    }
+
+    private async Task<Torrent> AddMagnetToDebridQueue(
+        string magnetLink,
+        Torrent torrent,
+        bool destructiveMutationLockHeld)
     {
         ValidateDownloadFilters(torrent);
 
@@ -131,7 +148,12 @@ public class Torrents(
         torrent.RdName = magnet.Name;
 
         var hash = magnet.InfoHashes.V1OrV2.ToHex();
-        var newTorrent = await AddQueued(hash, enriched, false, torrent);
+        var newTorrent = await AddQueued(
+            hash,
+            enriched,
+            false,
+            torrent,
+            destructiveMutationLockHeld);
 
         Log($"Adding {hash} (magnet link) to queue", newTorrent);
         await CopyAddedTorrent(magnet.Name!, magnetLink);
@@ -139,7 +161,15 @@ public class Torrents(
         return newTorrent;
     }
 
-    public async Task<Torrent> AddFileToDebridQueue(Byte[] bytes, Torrent torrent)
+    public Task<Torrent> AddFileToDebridQueue(Byte[] bytes, Torrent torrent)
+    {
+        return AddFileToDebridQueue(bytes, torrent, false);
+    }
+
+    private async Task<Torrent> AddFileToDebridQueue(
+        Byte[] bytes,
+        Torrent torrent,
+        bool destructiveMutationLockHeld)
     {
         ValidateDownloadFilters(torrent);
 
@@ -188,7 +218,12 @@ public class Torrents(
 
         var hash = monoTorrent.InfoHashes.V1OrV2.ToHex();
 
-        var newTorrent = await AddQueued(hash, fileAsBase64, true, torrent);
+        var newTorrent = await AddQueued(
+            hash,
+            fileAsBase64,
+            true,
+            torrent,
+            destructiveMutationLockHeld);
 
         Log($"Adding {hash} (torrent file) to queue", newTorrent);
 
@@ -393,12 +428,21 @@ public class Torrents(
 
         try
         {
-            await DeleteCore(
-                torrentId,
-                deleteData,
-                deleteRdTorrent,
-                deleteLocalFiles,
-                hideFromQbittorrent);
+            await TorrentAddLock.WaitAsync();
+
+            try
+            {
+                await DeleteCore(
+                    torrentId,
+                    deleteData,
+                    deleteRdTorrent,
+                    deleteLocalFiles,
+                    hideFromQbittorrent);
+            }
+            finally
+            {
+                TorrentAddLock.Release();
+            }
         }
         finally
         {
@@ -443,22 +487,7 @@ public class Torrents(
 
         if (deleteRdTorrent && torrent.RdId != null)
         {
-            Log("Deleting torrent from AllDebrid", torrent);
-
-            try
-            {
-                await TorrentClient.Delete(torrent.RdId);
-            }
-            catch (AllDebridException ex) when (string.Equals(
-                       ex.ErrorCode,
-                       MissingProviderTorrentErrorCode,
-                       StringComparison.Ordinal))
-            {
-                logger.LogDebug(
-                    "AllDebrid torrent {ProviderTorrentId} was already absent while deleting {TorrentHash}",
-                    torrent.RdId,
-                    torrent.Hash);
-            }
+            await DeleteProviderTorrent(torrent);
         }
 
         if (deleteData)
@@ -473,6 +502,31 @@ public class Torrents(
             hideFromQbittorrent,
             deleteRdTorrent,
             hasDeletionEffects && !torrent.Completed.HasValue);
+    }
+
+    private async Task DeleteProviderTorrent(Torrent torrent)
+    {
+        if (torrent.RdId == null)
+        {
+            return;
+        }
+
+        Log("Deleting torrent from AllDebrid", torrent);
+
+        try
+        {
+            await TorrentClient.Delete(torrent.RdId);
+        }
+        catch (AllDebridException ex) when (string.Equals(
+                   ex.ErrorCode,
+                   MissingProviderTorrentErrorCode,
+                   StringComparison.Ordinal))
+        {
+            logger.LogDebug(
+                "AllDebrid torrent {ProviderTorrentId} was already absent while deleting {TorrentHash}",
+                torrent.RdId,
+                torrent.Hash);
+        }
     }
 
     private async Task StopActiveClient<TClient>(
@@ -768,11 +822,11 @@ public class Torrents(
             {
                 var bytes = Convert.FromBase64String(torrent.FileOrMagnet);
 
-                newTorrent = await AddFileToDebridQueue(bytes, torrent);
+                newTorrent = await AddFileToDebridQueue(bytes, torrent, true);
             }
             else
             {
-                newTorrent = await AddMagnetToDebridQueue(torrent.FileOrMagnet, torrent);
+                newTorrent = await AddMagnetToDebridQueue(torrent.FileOrMagnet, torrent, true);
             }
 
             await torrentData.UpdateRetry(newTorrent.TorrentId, null, retryCount);
@@ -918,45 +972,237 @@ public class Torrents(
         return torrentPath;
     }
 
+    private HashSet<Guid> GetDownloadsToReset(Torrent torrent)
+    {
+        try
+        {
+            var jobRoot = GetSafeCapturedJobPath(torrent);
+            EnsureDirectoryWhenPresent(jobRoot);
+            var categoryRoot = fileSystem.Path.GetDirectoryName(jobRoot)!;
+            var downloadsToReset = new HashSet<Guid>();
+
+            foreach (var download in torrent.Downloads)
+            {
+                var relativePath = DownloadHelper.GetDownloadPath(torrent, download);
+
+                if (relativePath == null)
+                {
+                    downloadsToReset.Add(download.DownloadId);
+                    continue;
+                }
+
+                var filePath = FileSystemPath.Normalize(fileSystem.Path.Combine(categoryRoot, relativePath));
+
+                if (!FileSystemPath.IsStrictDescendant(filePath, jobRoot) ||
+                    FileSystemPath.ContainsReparsePoint(fileSystem, filePath, jobRoot))
+                {
+                    throw new InvalidDataException("A retained download path is outside its job boundary or contains a reparse point.");
+                }
+
+                var attributes = GetAttributesIfPresent(filePath);
+
+                if (attributes?.HasFlag(FileAttributes.ReparsePoint) == true ||
+                    attributes?.HasFlag(FileAttributes.Directory) == true)
+                {
+                    throw new InvalidDataException("A retained download path is not a regular file.");
+                }
+
+                if (attributes == null || !download.Completed.HasValue || !string.IsNullOrWhiteSpace(download.Error))
+                {
+                    downloadsToReset.Add(download.DownloadId);
+                }
+            }
+
+            return downloadsToReset;
+        }
+        catch (InvalidDataException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            throw new InvalidDataException(
+                "The captured torrent job path could not be inspected safely.",
+                ex);
+        }
+    }
+
+    private string GetSafeCapturedJobPath(Torrent torrent)
+    {
+        if (string.IsNullOrWhiteSpace(torrent.LocalDownloadPath))
+        {
+            throw new InvalidDataException(
+                "The retained torrent has no captured local download path and cannot be reactivated safely.");
+        }
+
+        var downloadRoot = FileSystemPath.Normalize(torrent.LocalDownloadPath);
+        var categoryRoot = DownloadHelper.GetCategoryPath(downloadRoot, torrent.Category, fileSystem);
+        var jobRoot = FileSystemPath.Normalize(fileSystem.Path.Combine(
+            categoryRoot,
+            DownloadHelper.GetTorrentDirectoryName(torrent)));
+
+        if (!FileSystemPath.IsStrictDescendant(jobRoot, categoryRoot) ||
+            !FileSystemPath.IsSameOrDescendant(categoryRoot, downloadRoot) ||
+            FileSystemPath.ContainsReparsePoint(fileSystem, jobRoot, downloadRoot))
+        {
+            throw new InvalidDataException(
+                "The captured torrent job path is outside its download boundary or contains a reparse point.");
+        }
+
+        EnsureDirectoryWhenPresent(downloadRoot);
+        EnsureDirectoryWhenPresent(categoryRoot);
+
+        return jobRoot;
+    }
+
+    private void EnsureDirectoryWhenPresent(string path)
+    {
+        var attributes = GetAttributesIfPresent(path);
+
+        if (attributes != null &&
+            (!attributes.Value.HasFlag(FileAttributes.Directory) ||
+             attributes.Value.HasFlag(FileAttributes.ReparsePoint)))
+        {
+            throw new InvalidDataException("A captured torrent path boundary is not a regular directory.");
+        }
+    }
+
+    private FileAttributes? GetAttributesIfPresent(string path)
+    {
+        try
+        {
+            return fileSystem.File.GetAttributes(path);
+        }
+        catch (FileNotFoundException)
+        {
+            return null;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return null;
+        }
+    }
+
+    private static bool HasActiveWork(Torrent torrent)
+    {
+        return torrent.Downloads.Any(download =>
+            TorrentRunner.ActiveDownloadClients.ContainsKey(download.DownloadId) ||
+            TorrentRunner.ActiveUnpackClients.ContainsKey(download.DownloadId));
+    }
+
+    private static bool HasTerminalError(Torrent torrent)
+    {
+        return !string.IsNullOrWhiteSpace(torrent.Error) ||
+               torrent.RdStatus == TorrentStatus.Error;
+    }
+
     private async Task<Torrent> AddQueued(string infoHash,
                                           string fileOrMagnetContents,
                                           bool isFile,
-                                          Torrent torrent)
+                                          Torrent torrent,
+                                          bool destructiveMutationLockHeld)
     {
-        await TorrentAddLock.WaitAsync();
+        if (!destructiveMutationLockHeld)
+        {
+            await DestructiveMutationLock.WaitAsync();
+        }
 
         try
         {
-            var existingTorrent = await torrentData.GetByHash(infoHash);
+            await TorrentAddLock.WaitAsync();
 
-            if (existingTorrent != null)
+            try
             {
-                if (!string.IsNullOrWhiteSpace(torrent.Category) &&
-                    !string.Equals(existingTorrent.Category, torrent.Category, StringComparison.OrdinalIgnoreCase))
+                var existingTorrent = await torrentData.GetByHash(infoHash);
+
+                if (existingTorrent != null)
                 {
-                    throw new InvalidOperationException(
-                        $"Torrent {existingTorrent.Hash} already exists under a different category.");
+                    if (!string.IsNullOrWhiteSpace(torrent.Category) &&
+                        !string.Equals(existingTorrent.Category, torrent.Category, StringComparison.OrdinalIgnoreCase))
+                    {
+                        throw new InvalidOperationException(
+                            $"Torrent {existingTorrent.Hash} already exists under a different category.");
+                    }
+
+                    if (!existingTorrent.QbittorrentHidden)
+                    {
+                        return existingTorrent;
+                    }
+
+                    IReadOnlySet<Guid>? downloadsToReset = null;
+
+                    if (!HasActiveWork(existingTorrent) &&
+                        (existingTorrent.Completed.HasValue || HasTerminalError(existingTorrent)))
+                    {
+                        var missingDownloads = GetDownloadsToReset(existingTorrent);
+
+                        if (missingDownloads.Count > 0 || existingTorrent.Downloads.Count == 0 || HasTerminalError(existingTorrent))
+                        {
+                            downloadsToReset = missingDownloads;
+                        }
+                    }
+
+                    var providerDeleted = false;
+
+                    if (downloadsToReset != null &&
+                        existingTorrent.RdStatus == TorrentStatus.Error &&
+                        existingTorrent.RdId != null)
+                    {
+                        await DeleteProviderTorrent(existingTorrent);
+                        providerDeleted = true;
+                    }
+
+                    torrent.FileOrMagnet = fileOrMagnetContents;
+                    torrent.IsFile = isFile;
+
+                    var reactivated = await torrentData.ReactivateFromQbittorrent(
+                        existingTorrent.TorrentId,
+                        torrent,
+                        downloadsToReset,
+                        providerDeleted);
+
+                    if (reactivated == null)
+                    {
+                        throw new InvalidOperationException(
+                            $"Torrent {existingTorrent.Hash} disappeared while it was being reactivated.");
+                    }
+
+                    return reactivated;
                 }
 
-                return existingTorrent;
+                return await torrentData.Add(null,
+                                             infoHash,
+                                             fileOrMagnetContents,
+                                             isFile,
+                                             torrent.DownloadClient,
+                                             torrent);
             }
-
-            return await torrentData.Add(null,
-                                         infoHash,
-                                         fileOrMagnetContents,
-                                         isFile,
-                                         torrent.DownloadClient,
-                                         torrent);
+            finally
+            {
+                TorrentAddLock.Release();
+            }
         }
         finally
         {
-            TorrentAddLock.Release();
+            if (!destructiveMutationLockHeld)
+            {
+                DestructiveMutationLock.Release();
+            }
         }
     }
 
     public async Task Update(Torrent torrent)
     {
-        await torrentData.Update(torrent);
+        await TorrentAddLock.WaitAsync();
+
+        try
+        {
+            await torrentData.Update(torrent);
+        }
+        finally
+        {
+            TorrentAddLock.Release();
+        }
     }
 
     public async Task RunTorrentComplete(Guid torrentId, DbSettings? settings = null)
