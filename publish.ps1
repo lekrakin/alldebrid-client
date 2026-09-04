@@ -63,6 +63,51 @@ function Assert-TemporaryPublishPath([string]$Parent, [string]$Candidate) {
     }
 }
 
+function Assert-PublishDestinationOwned([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return
+    }
+
+    $destination = Get-Item -LiteralPath $Path -Force
+    if (($destination.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "Refusing to replace a publish destination that is a reparse point: $Path"
+    }
+
+    $entries = @(Get-ChildItem -LiteralPath $Path -Force)
+    if ($entries.Count -eq 0) {
+        return
+    }
+
+    $requiredOutput = @(
+        "AdbClient.Web.dll",
+        "AdbClient.Web.deps.json",
+        "AdbClient.Web.runtimeconfig.json",
+        "appsettings.json",
+        (Join-Path "wwwroot" "index.html")
+    )
+    $missingOutput = @($requiredOutput | Where-Object {
+        $requiredPath = Join-Path $Path $_
+        if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
+            return $true
+        }
+
+        $requiredItem = Get-Item -LiteralPath $requiredPath -Force
+        return ($requiredItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0
+    })
+
+    $webRootPath = Join-Path $Path "wwwroot"
+    if (Test-Path -LiteralPath $webRootPath -PathType Container) {
+        $webRoot = Get-Item -LiteralPath $webRootPath -Force
+        if (($webRoot.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            $missingOutput += (Join-Path "wwwroot" "index.html")
+        }
+    }
+
+    if ($missingOutput.Count -gt 0) {
+        throw "Refusing to clean non-empty destination because it is not a recognizable AllDebrid Client publish output: $Path"
+    }
+}
+
 if ([string]::IsNullOrWhiteSpace($InstallPath)) {
     $InstallPath = Join-Path $root "publish"
 }
@@ -78,6 +123,8 @@ if ($InstallPath -ieq $projectRoot -or $InstallPath -ieq $driveRoot) {
 if (Test-Path -LiteralPath $InstallPath -PathType Leaf) {
     throw "Publish destination is a file, not a directory: $InstallPath"
 }
+
+Assert-PublishDestinationOwned $InstallPath
 
 if ($env:OS -eq "Windows_NT" -and $null -ne (Get-Command Get-CimInstance -ErrorAction SilentlyContinue)) {
     $service = Get-CimInstance Win32_Service -Filter "Name='AllDebridClient'" -ErrorAction SilentlyContinue
@@ -210,9 +257,14 @@ try {
         New-Item -ItemType Directory -Path $InstallPath | Out-Null
     }
 
-    Get-ChildItem -LiteralPath $InstallPath -Force |
-        Where-Object { $protectedTopLevelNames -notcontains $_.Name } |
-        Remove-Item -Recurse -Force
+    foreach ($item in @(Get-ChildItem -LiteralPath $InstallPath -Force |
+            Where-Object { $protectedTopLevelNames -notcontains $_.Name })) {
+        if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+            Remove-Item -LiteralPath $item.FullName -Force
+        } else {
+            Remove-Item -LiteralPath $item.FullName -Recurse -Force
+        }
+    }
 
     Get-ChildItem -LiteralPath $stagingDirectory -Force |
         Move-Item -Destination $InstallPath
