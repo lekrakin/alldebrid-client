@@ -296,10 +296,12 @@
     <section id="settings-panel-account" aria-labelledby="settings-tab-account">
       <div class="account-panel">
         <h2 class="title is-5 mb-2">Account</h2>
-        <p class="has-text-grey mb-5">Change the credentials used to access this application.</p>
+        <p class="has-text-grey mb-5">
+          Set the credentials used to access this application. Enter both fields when creating the first account.
+        </p>
 
         <div class="field">
-          <label class="label" for="profile-username">New username</label>
+          <label class="label" for="profile-username">Username</label>
           <div class="control">
             <input
               class="input"
@@ -311,11 +313,11 @@
               (ngModelChange)="profileUsername.set($event)"
             />
           </div>
-          <p class="help">Leave blank to keep the current username.</p>
+          <p class="help">For an existing account, leave blank to keep the current username.</p>
         </div>
 
         <div class="field">
-          <label class="label" for="profile-password">New password</label>
+          <label class="label" for="profile-password">Password</label>
           <div class="control">
             <input
               class="input"
@@ -327,14 +329,14 @@
               (ngModelChange)="profilePassword.set($event)"
             />
           </div>
-          <p class="help">Leave blank to keep the current password.</p>
+          <p class="help">For an existing account, leave blank to keep the current password.</p>
         </div>
 
         @if (profileError(); as profileError) {
           <div class="notification is-danger is-light" role="alert">{{ profileError }}</div>
         }
         @if (profileSuccess()) {
-          <div class="notification is-success is-light" role="status">Account credentials updated.</div>
+          <div class="notification is-success is-light" role="status">Account credentials saved.</div>
         }
 
         <button
@@ -344,7 +346,7 @@
           [disabled]="profileSaving() || (!profileUsername() && !profilePassword())"
           [ngClass]="{ 'is-loading': profileSaving() }"
         >
-          Update account
+          Save account
         </button>
       </div>
     </section>
