@@ -9,74 +9,218 @@ $ErrorActionPreference = "Stop"
 $PSNativeCommandUseErrorActionPreference = $true
 $root = $PSScriptRoot
 
+function Get-NormalizedDirectoryPath([string]$Path) {
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    $pathRoot = [System.IO.Path]::GetPathRoot($fullPath)
+
+    if ($fullPath.Length -gt $pathRoot.Length) {
+        return $fullPath.TrimEnd('\', '/')
+    }
+
+    return $fullPath
+}
+
+function Test-SameOrDescendantPath([string]$Parent, [string]$Candidate) {
+    $normalizedParent = Get-NormalizedDirectoryPath $Parent
+    $normalizedCandidate = Get-NormalizedDirectoryPath $Candidate
+
+    if ($normalizedCandidate.Equals($normalizedParent, [StringComparison]::OrdinalIgnoreCase)) {
+        return $true
+    }
+
+    $prefix = $normalizedParent
+    if ($prefix[$prefix.Length - 1] -ne [System.IO.Path]::DirectorySeparatorChar) {
+        $prefix += [System.IO.Path]::DirectorySeparatorChar
+    }
+
+    return $normalizedCandidate.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)
+}
+
+function Resolve-ConfiguredPath([string]$Path, [string]$BasePath) {
+    if ([System.IO.Path]::IsPathRooted($Path)) {
+        return [System.IO.Path]::GetFullPath($Path)
+    }
+
+    return [System.IO.Path]::GetFullPath((Join-Path $BasePath $Path))
+}
+
+function Get-ServiceApplicationPath([string]$PathName) {
+    $tokens = [regex]::Matches($PathName, '"([^"]+)"|(\S+)') | ForEach-Object {
+        if ($_.Groups[1].Success) { $_.Groups[1].Value } else { $_.Groups[2].Value }
+    }
+
+    return $tokens | Where-Object {
+        $_ -match '(?i)AdbClient\.Web\.(dll|exe)$'
+    } | Select-Object -First 1
+}
+
+function Assert-TemporaryPublishPath([string]$Parent, [string]$Candidate) {
+    $candidateName = Split-Path -Leaf $Candidate
+    if (-not (Test-SameOrDescendantPath $Parent $Candidate) -or
+        (Get-NormalizedDirectoryPath $Parent) -ieq (Get-NormalizedDirectoryPath $Candidate) -or
+        -not $candidateName.StartsWith('.adbclient-publish-', [StringComparison]::Ordinal)) {
+        throw "Refusing to use an unexpected staging path: $Candidate"
+    }
+}
+
 if ([string]::IsNullOrWhiteSpace($InstallPath)) {
     $InstallPath = Join-Path $root "publish"
 }
 
-$InstallPath = [System.IO.Path]::GetFullPath($InstallPath)
-$projectRoot = [System.IO.Path]::GetFullPath($root).TrimEnd('\', '/')
-$driveRoot = [System.IO.Path]::GetPathRoot($InstallPath).TrimEnd('\', '/')
-$normalizedInstallPath = $InstallPath.TrimEnd('\', '/')
+$InstallPath = Get-NormalizedDirectoryPath $InstallPath
+$projectRoot = Get-NormalizedDirectoryPath $root
+$driveRoot = Get-NormalizedDirectoryPath ([System.IO.Path]::GetPathRoot($InstallPath))
 
-if ($normalizedInstallPath -ieq $projectRoot -or $normalizedInstallPath -ieq $driveRoot) {
+if ($InstallPath -ieq $projectRoot -or $InstallPath -ieq $driveRoot) {
     throw "Refusing to publish over the project root or a drive root: $InstallPath"
 }
 
-$service = Get-CimInstance Win32_Service -Filter "Name='AllDebridClient'" -ErrorAction SilentlyContinue
-if ($service.State -eq "Running" -and $service.PathName.IndexOf($normalizedInstallPath, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
-    throw "AllDebridClient is running from $InstallPath. Stop the service before publishing over its files."
+if (Test-Path -LiteralPath $InstallPath -PathType Leaf) {
+    throw "Publish destination is a file, not a directory: $InstallPath"
+}
+
+if ($env:OS -eq "Windows_NT" -and $null -ne (Get-Command Get-CimInstance -ErrorAction SilentlyContinue)) {
+    $service = Get-CimInstance Win32_Service -Filter "Name='AllDebridClient'" -ErrorAction SilentlyContinue
+
+    if ($null -ne $service) {
+        $serviceApplicationPath = Get-ServiceApplicationPath $service.PathName
+
+        if (-not [string]::IsNullOrWhiteSpace($serviceApplicationPath)) {
+            $serviceApplicationPath = [System.IO.Path]::GetFullPath($serviceApplicationPath)
+            $serviceDirectory = Split-Path -Parent $serviceApplicationPath
+            $pathsOverlap = (Test-SameOrDescendantPath $InstallPath $serviceApplicationPath) -or
+                            (Test-SameOrDescendantPath $serviceDirectory $InstallPath)
+
+            if ($pathsOverlap) {
+                throw "Refusing to publish into files registered to the AllDebridClient service ($($service.State)): $serviceDirectory. Use deploy.ps1 for service installations."
+            }
+        }
+    }
+}
+
+$existingSettingsPath = Join-Path $InstallPath "appsettings.json"
+$existingSettings = $null
+
+if (Test-Path -LiteralPath $existingSettingsPath -PathType Leaf) {
+    try {
+        $existingSettings = Get-Content -LiteralPath $existingSettingsPath -Raw | ConvertFrom-Json
+    } catch {
+        throw "Existing startup configuration is not valid JSON: $existingSettingsPath"
+    }
 }
 
 if ([string]::IsNullOrWhiteSpace($DataPath)) {
-    $DataPath = Join-Path $InstallPath "data"
-}
-
-$DataPath = [System.IO.Path]::GetFullPath($DataPath)
-$settingsPath = Join-Path $InstallPath "appsettings.json"
-
-Write-Host "==> Building frontend"
-Push-Location (Join-Path $root "client")
-try {
-    npm run build
-    if ($LASTEXITCODE -ne 0) {
-        throw "Frontend build failed with exit code $LASTEXITCODE."
+    if ($null -ne $existingSettings -and -not [string]::IsNullOrWhiteSpace($existingSettings.DataPath)) {
+        $DataPath = $existingSettings.DataPath
+    } else {
+        $DataPath = Join-Path $InstallPath "data"
     }
-} finally {
-    Pop-Location
 }
 
-Write-Host "==> Cleaning install directory"
-if (Test-Path $InstallPath) {
-    Get-ChildItem -LiteralPath $InstallPath |
-        Where-Object { $_.Name -ne "data" } |
+$DataPath = Resolve-ConfiguredPath $DataPath $InstallPath
+
+if ((Get-NormalizedDirectoryPath $DataPath) -ieq $InstallPath) {
+    throw "DataPath cannot be the publish destination because application files cannot be replaced without risking persistent data: $DataPath"
+}
+
+if (Test-Path -LiteralPath $DataPath -PathType Leaf) {
+    throw "DataPath is a file, not a directory: $DataPath"
+}
+
+$protectedPaths = @($DataPath)
+
+if ($null -ne $existingSettings) {
+    if (-not [string]::IsNullOrWhiteSpace($existingSettings.Database.Path)) {
+        $protectedPaths += Resolve-ConfiguredPath $existingSettings.Database.Path $DataPath
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($existingSettings.Logging.File.Path)) {
+        $protectedPaths += Resolve-ConfiguredPath $existingSettings.Logging.File.Path $DataPath
+    }
+}
+
+$protectedTopLevelNames = @($protectedPaths | ForEach-Object {
+    $protectedPath = [System.IO.Path]::GetFullPath($_)
+
+    if (Test-SameOrDescendantPath $InstallPath $protectedPath) {
+        $installPrefix = $InstallPath.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+        $relativePath = $protectedPath.Substring($installPrefix.Length)
+        $relativePath.Split([char[]]@('\', '/'), [StringSplitOptions]::RemoveEmptyEntries)[0]
+    }
+} | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+
+$installParent = Split-Path -Parent $InstallPath
+$stagingDirectory = Join-Path $installParent ".adbclient-publish-$([Guid]::NewGuid().ToString('N'))"
+$stagingDirectory = Get-NormalizedDirectoryPath $stagingDirectory
+Assert-TemporaryPublishPath $installParent $stagingDirectory
+
+try {
+    Write-Host "==> Building frontend"
+    Push-Location (Join-Path $root "client")
+    try {
+        npm run build
+        if ($LASTEXITCODE -ne 0) {
+            throw "Frontend build failed with exit code $LASTEXITCODE."
+        }
+    } finally {
+        Pop-Location
+    }
+
+    New-Item -ItemType Directory -Path $installParent -Force | Out-Null
+    New-Item -ItemType Directory -Path $stagingDirectory | Out-Null
+
+    Write-Host "==> Publishing into staging"
+    $publishArguments = @(
+        "publish",
+        (Join-Path $root "server\AdbClient.Web\AdbClient.Web.csproj"),
+        "--configuration", "Release",
+        "--output", $stagingDirectory
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($Version)) {
+        $publishArguments += "-p:Version=$Version"
+        $publishArguments += "-p:AssemblyVersion=$Version"
+    }
+
+    & dotnet @publishArguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Backend publish failed with exit code $LASTEXITCODE."
+    }
+
+    $stagedSettingsPath = Join-Path $stagingDirectory "appsettings.json"
+    if ($null -ne $existingSettings) {
+        Copy-Item -LiteralPath $existingSettingsPath -Destination $stagedSettingsPath -Force
+    }
+
+    Write-Host "==> Setting data path to $DataPath"
+    $settings = Get-Content -LiteralPath $stagedSettingsPath -Raw | ConvertFrom-Json
+    $settings.DataPath = $DataPath
+    $settings | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $stagedSettingsPath -Encoding UTF8
+
+    foreach ($protectedName in $protectedTopLevelNames) {
+        if (Test-Path -LiteralPath (Join-Path $stagingDirectory $protectedName)) {
+            throw "Published application output conflicts with protected persistent data path: $protectedName"
+        }
+    }
+
+    New-Item -ItemType Directory -Path $DataPath -Force | Out-Null
+
+    Write-Host "==> Replacing application files in $InstallPath"
+    if (-not (Test-Path -LiteralPath $InstallPath -PathType Container)) {
+        New-Item -ItemType Directory -Path $InstallPath | Out-Null
+    }
+
+    Get-ChildItem -LiteralPath $InstallPath -Force |
+        Where-Object { $protectedTopLevelNames -notcontains $_.Name } |
         Remove-Item -Recurse -Force
-} else {
-    New-Item -ItemType Directory -Path $InstallPath | Out-Null
+
+    Get-ChildItem -LiteralPath $stagingDirectory -Force |
+        Move-Item -Destination $InstallPath
+
+    Write-Host "==> Done: $InstallPath"
+} finally {
+    if (Test-Path -LiteralPath $stagingDirectory) {
+        Assert-TemporaryPublishPath $installParent $stagingDirectory
+        Remove-Item -LiteralPath $stagingDirectory -Recurse -Force
+    }
 }
-
-Write-Host "==> Publishing to $InstallPath"
-$publishArguments = @(
-    "publish",
-    (Join-Path $root "server\AdbClient.Web\AdbClient.Web.csproj"),
-    "--configuration", "Release",
-    "--output", $InstallPath
-)
-
-if (-not [string]::IsNullOrWhiteSpace($Version)) {
-    $publishArguments += "-p:Version=$Version"
-    $publishArguments += "-p:AssemblyVersion=$Version"
-}
-
-& dotnet @publishArguments
-if ($LASTEXITCODE -ne 0) {
-    throw "Backend publish failed with exit code $LASTEXITCODE."
-}
-
-Write-Host "==> Setting data path to $DataPath"
-$settings = Get-Content $settingsPath -Raw | ConvertFrom-Json
-$settings.DataPath = $DataPath
-$settings | ConvertTo-Json -Depth 10 | Set-Content $settingsPath
-
-New-Item -ItemType Directory -Path $DataPath -Force | Out-Null
-
-Write-Host "==> Done: $InstallPath"
