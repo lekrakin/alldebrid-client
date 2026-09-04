@@ -37,7 +37,7 @@ public class DbSettingsGeneral
 {
     [DisplayName("Log level")]
     [Description("Warning for normal use; Debug for diagnosing issues.")]
-    public LogLevel LogLevel { get; set; } = LogLevel.Error;
+    public LogLevel LogLevel { get; set; } = LogLevel.Warning;
 
     [DisplayName("Authentication")]
     [Description("WARNING: No Authentication allows access to anyone who can reach this application.")]
@@ -91,8 +91,8 @@ public class DbSettingsTorrentDefaults : DbSettingsDownloadRules
     public string? Category { get; set; }
 
     [DisplayName("Completed record action")]
-    [Description("Controls AllDebrid Client and provider records after local files are saved; it never deletes local files.")]
-    public TorrentFinishedAction FinishedAction { get; set; } = TorrentFinishedAction.RemoveAllTorrents;
+    [Description("Records are retained by default. This controls AllDebrid Client and provider records after local files are saved; it never deletes local files.")]
+    public TorrentFinishedAction FinishedAction { get; set; } = TorrentFinishedAction.None;
 
     [DisplayName("Completed action delay (minutes)")]
     [Description("Minutes to wait before applying the completed record action.")]

@@ -47,6 +47,10 @@ public class SettingDataTest
         Assert.Equal(expectedDownloadPath, settings["Storage:DownloadPath"].Value);
         Assert.Null(settings["Integrations:ReportedDownloadPath"].Value);
 
+        await settingData.ResetCache();
+        Assert.Equal(AdbClient.Data.Enums.LogLevel.Warning, SettingData.Get.General.LogLevel);
+        Assert.Equal(AdbClient.Data.Enums.TorrentFinishedAction.None, SettingData.Get.Downloads.Defaults.FinishedAction);
+
     }
 
     [Fact]
