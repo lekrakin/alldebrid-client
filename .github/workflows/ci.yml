@@ -104,6 +104,10 @@ jobs:
         shell: powershell
         run: .\tools\test-service-paths.ps1
 
+      - name: Verify service update and rollback transactions
+        shell: powershell
+        run: .\tools\test-service-update.ps1
+
   container:
     name: Container
     runs-on: ubuntu-latest
