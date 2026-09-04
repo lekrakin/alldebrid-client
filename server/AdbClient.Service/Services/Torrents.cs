@@ -25,8 +25,13 @@ public class Torrents(
     IProcessFactory processFactory,
     IFileSystem fileSystem,
     IEnricher enricher,
-    AllDebridTorrentClient allDebridTorrentClient)
+    AllDebridTorrentClient allDebridTorrentClient,
+    Func<TimeSpan, Task>? delay = null)
 {
+    private const int DownloadCancellationAttempts = 5;
+    private const int UnpackCancellationAttempts = 10;
+    private static readonly TimeSpan CancellationPollInterval = TimeSpan.FromMilliseconds(500);
+
     private static readonly SemaphoreSlim ProviderUpdateLock = new(1, 1);
     private static readonly SemaphoreSlim TorrentAddLock = new(1, 1);
 
@@ -36,6 +41,7 @@ public class Torrents(
     };
 
     private ITorrentClient TorrentClient => allDebridTorrentClient;
+    private readonly Func<TimeSpan, Task> _delay = delay ?? Task.Delay;
 
     private static readonly SemaphoreSlim TorrentResetLock = new(1, 1);
 
@@ -359,41 +365,28 @@ public class Torrents(
 
         foreach (var download in torrent.Downloads)
         {
-            var retry = 10;
-
-            while (TorrentRunner.ActiveDownloadClients.TryGetValue(download.DownloadId, out var downloadClient))
-            {
-                Log($"Cancelling download", download, torrent);
-
-                await downloadClient.Cancel();
-
-                await Task.Delay(500);
-
-                retry++;
-
-                if (retry > 5)
+            await CancelWhileActive(
+                () => TorrentRunner.ActiveDownloadClients.TryGetValue(download.DownloadId, out var client)
+                    ? client
+                    : null,
+                async client =>
                 {
-                    break;
-                }
-            }
+                    Log("Cancelling download", download, torrent);
+                    await client.Cancel();
+                },
+                DownloadCancellationAttempts);
 
-            retry = 10;
-
-            while (TorrentRunner.ActiveUnpackClients.TryGetValue(download.DownloadId, out var unpackClient))
-            {
-                Log($"Cancelling unpack", download, torrent);
-
-                unpackClient.Cancel();
-
-                await Task.Delay(500);
-
-                retry++;
-
-                if (retry > 10)
+            await CancelWhileActive(
+                () => TorrentRunner.ActiveUnpackClients.TryGetValue(download.DownloadId, out var client)
+                    ? client
+                    : null,
+                client =>
                 {
-                    break;
-                }
-            }
+                    Log("Cancelling unpack", download, torrent);
+                    client.Cancel();
+                    return Task.CompletedTask;
+                },
+                UnpackCancellationAttempts);
         }
 
         if (deleteData)
@@ -421,6 +414,26 @@ public class Torrents(
         if (localDownloadPath != null)
         {
             await DeleteLocalFiles(torrent, localDownloadPath);
+        }
+    }
+
+    private async Task CancelWhileActive<TClient>(
+        Func<TClient?> getActiveClient,
+        Func<TClient, Task> cancel,
+        int maxAttempts)
+        where TClient : class
+    {
+        for (var attempt = 0; attempt < maxAttempts; attempt++)
+        {
+            var activeClient = getActiveClient();
+
+            if (activeClient == null)
+            {
+                return;
+            }
+
+            await cancel(activeClient);
+            await _delay(CancellationPollInterval);
         }
     }
 

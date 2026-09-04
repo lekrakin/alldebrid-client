@@ -358,4 +358,124 @@ public class TorrentsTest
         Assert.Matches("error-line 2", exitedWithOutputMessage);
         Assert.Matches("error-line 3", exitedWithOutputMessage);
     }
+
+    [Fact]
+    public async Task Delete_WhenNoClientIsActive_DoesNotPoll()
+    {
+        var (torrent, _, mocks) = CreateTorrentForCancellationTest();
+        var delayCalls = 0;
+        var service = CreateService(mocks, _ =>
+        {
+            delayCalls++;
+            return Task.CompletedTask;
+        });
+
+        await service.Delete(torrent.TorrentId, false, false, false);
+
+        Assert.Equal(0, delayCalls);
+    }
+
+    [Theory]
+    [InlineData(false, 5)]
+    [InlineData(true, 10)]
+    public async Task Delete_WhenClientRemainsActive_BoundsCancellationPolling(
+        bool unpack,
+        int expectedAttempts)
+    {
+        var (torrent, download, mocks) = CreateTorrentForCancellationTest();
+        var delayCalls = 0;
+        var service = CreateService(mocks, _ =>
+        {
+            delayCalls++;
+            return Task.CompletedTask;
+        });
+
+        try
+        {
+            if (unpack)
+            {
+                TorrentRunner.ActiveUnpackClients[download.DownloadId] = new UnpackClient(download, "unused");
+            }
+            else
+            {
+                TorrentRunner.ActiveDownloadClients[download.DownloadId] = new DownloadClient(download, torrent, "unused");
+            }
+
+            await service.Delete(torrent.TorrentId, false, false, false);
+
+            Assert.Equal(expectedAttempts, delayCalls);
+        }
+        finally
+        {
+            TorrentRunner.ActiveDownloadClients.TryRemove(download.DownloadId, out _);
+            TorrentRunner.ActiveUnpackClients.TryRemove(download.DownloadId, out _);
+        }
+    }
+
+    [Fact]
+    public async Task Delete_WhenClientBecomesInactive_StopsPolling()
+    {
+        var (torrent, download, mocks) = CreateTorrentForCancellationTest();
+        var delayCalls = 0;
+        var service = CreateService(mocks, interval =>
+        {
+            delayCalls++;
+
+            if (delayCalls == 2)
+            {
+                TorrentRunner.ActiveDownloadClients.TryRemove(download.DownloadId, out _);
+            }
+
+            return Task.CompletedTask;
+        });
+
+        try
+        {
+            TorrentRunner.ActiveDownloadClients[download.DownloadId] = new DownloadClient(download, torrent, "unused");
+
+            await service.Delete(torrent.TorrentId, false, false, false);
+
+            Assert.Equal(2, delayCalls);
+        }
+        finally
+        {
+            TorrentRunner.ActiveDownloadClients.TryRemove(download.DownloadId, out _);
+        }
+    }
+
+    private static (Torrent Torrent, Download Download, Mocks Mocks) CreateTorrentForCancellationTest()
+    {
+        var torrent = new Torrent
+        {
+            TorrentId = Guid.NewGuid(),
+            Hash = Guid.NewGuid().ToString("N"),
+            RdName = "cancellation-test"
+        };
+        var download = new Download
+        {
+            DownloadId = Guid.NewGuid(),
+            TorrentId = torrent.TorrentId,
+            Torrent = torrent,
+            Path = "file.bin"
+        };
+        torrent.Downloads.Add(download);
+
+        var mocks = new Mocks();
+        mocks.TorrentDataMock.Setup(data => data.GetById(torrent.TorrentId)).ReturnsAsync(torrent);
+
+        return (torrent, download, mocks);
+    }
+
+    private static TorrentsService CreateService(Mocks mocks, Func<TimeSpan, Task> delay)
+    {
+        return new TorrentsService(
+            mocks.TorrentsLoggerMock.Object,
+            mocks.TorrentDataMock.Object,
+            mocks.DownloadsMock.Object,
+            mocks.ProcessFactoryMock.Object,
+            new MockFileSystem(),
+            mocks.EnricherMock.Object,
+            null!,
+            delay);
+    }
 }
