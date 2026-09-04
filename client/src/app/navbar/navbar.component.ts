@@ -1,4 +1,5 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnInit, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NavigationEnd, Router, RouterLink } from '@angular/router';
 import { AuthService } from '../auth.service';
 import { Profile } from '../models/profile.model';
@@ -16,34 +17,43 @@ export class NavbarComponent implements OnInit {
   private authService = inject(AuthService);
   private router = inject(Router);
 
-  public showMobileMenu = false;
+  public readonly showMobileMenu = signal(false);
 
-  public profile: Profile;
+  public readonly profile = signal<Profile | null>(null);
   public readonly providerLink = 'https://alldebrid.com/account/';
-  public version: string;
+  public readonly version = signal('');
+  public premiumDays(): number {
+    const expiration = this.profile()?.expiration;
+
+    if (!expiration) {
+      return 0;
+    }
+
+    const diff = new Date(expiration).getTime() - Date.now();
+
+    return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
+  }
 
   constructor() {
-    this.router.events.subscribe((event) => {
+    this.router.events.pipe(takeUntilDestroyed()).subscribe((event) => {
       if (event instanceof NavigationEnd) {
-        this.showMobileMenu = false;
+        this.showMobileMenu.set(false);
       }
     });
   }
 
   ngOnInit(): void {
     this.settingsService.getProfile().subscribe((result) => {
-      this.profile = result;
+      this.profile.set(result);
     });
 
     this.settingsService.getVersion().subscribe((result) => {
-      this.version = result.version;
+      this.version.set(result.version);
     });
   }
 
-  get premiumDays(): number {
-    if (!this.profile?.expiration) return 0;
-    const diff = new Date(this.profile.expiration).getTime() - Date.now();
-    return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
+  public toggleMobileMenu(): void {
+    this.showMobileMenu.update((isOpen) => !isOpen);
   }
 
   public logout(): void {

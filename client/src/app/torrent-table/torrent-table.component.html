@@ -1,4 +1,7 @@
-@if (error && error.length > 0) {
+@let torrentItems = torrents();
+@let selectedTorrentIds = selectedTorrents();
+
+@if (error(); as error) {
   <div class="notification is-danger is-light">
     An error has occurred: {{ error }}<br />
     Please refresh the screen after fixing this error.
@@ -26,7 +29,7 @@
           <input
             type="checkbox"
             (click)="toggleDeleteSelectAll($event)"
-            [checked]="selectedTorrents.length > 0 && selectedTorrents.length === torrents.length"
+            [checked]="selectedTorrentIds.length > 0 && selectedTorrentIds.length === torrentItems.length"
           />
         </th>
         <th (click)="sort('rdName')">Name <i class="fas" [ngClass]="sortIcon('rdName')"></i></th>
@@ -43,13 +46,16 @@
       </tr>
     </thead>
     <tbody>
-      @for (torrent of torrents | filter: filterText | sort: sortProperty : sortDirection; track torrent.torrentId) {
+      @for (
+        torrent of torrentItems | filter: filterText | sort: sortProperty : sortDirection;
+        track torrent.torrentId
+      ) {
         <tr>
           <td>
             <input
               type="checkbox"
               (click)="toggleSelect(torrent.torrentId)"
-              [checked]="selectedTorrents.includes(torrent.torrentId)"
+              [checked]="selectedTorrentIds.includes(torrent.torrentId)"
             />
           </td>
           <td (click)="openTorrent(torrent.torrentId)" class="break-all">
@@ -85,21 +91,21 @@
   </table>
 
   <div class="flex-container">
-    @if (torrents.length > 0) {
-      <button class="button is-danger" (click)="showDeleteModal()" [disabled]="selectedTorrents.length === 0">
+    @if (torrentItems.length > 0) {
+      <button class="button is-danger" (click)="showDeleteModal()" [disabled]="selectedTorrentIds.length === 0">
         Delete Selected
       </button>
-      <button class="button is-primary" (click)="showRetryModal()" [disabled]="selectedTorrents.length === 0">
+      <button class="button is-primary" (click)="showRetryModal()" [disabled]="selectedTorrentIds.length === 0">
         Retry Selected
       </button>
-      <button class="button is-primary" (click)="changeSettingsModal()" [disabled]="selectedTorrents.length === 0">
+      <button class="button is-primary" (click)="changeSettingsModal()" [disabled]="selectedTorrentIds.length === 0">
         Change Settings
       </button>
     }
   </div>
 </div>
 
-<div class="modal" [class.is-active]="isDeleteModalActive">
+<div class="modal" [class.is-active]="isDeleteModalActive()">
   <div class="modal-background"></div>
   <div class="modal-card">
     <header class="modal-card-head">
@@ -136,7 +142,7 @@
       <div class="notification is-primary">
         Deleting a torrent from AllDebrid will automatically delete it here too.
       </div>
-      @if (deleteError?.length > 0) {
+      @if (deleteError(); as deleteError) {
         <div class="notification is-danger is-light">Error deleting torrent: {{ deleteError }}</div>
       }
     </section>
@@ -144,19 +150,19 @@
       <button
         class="button is-success"
         (click)="deleteOk()"
-        [disabled]="deleting"
-        [ngClass]="{ 'is-loading': deleting }"
+        [disabled]="deleting()"
+        [ngClass]="{ 'is-loading': deleting() }"
       >
         Delete selected
       </button>
-      <button class="button" (click)="deleteCancel()" [disabled]="deleting" [ngClass]="{ 'is-loading': deleting }">
+      <button class="button" (click)="deleteCancel()" [disabled]="deleting()" [ngClass]="{ 'is-loading': deleting() }">
         Cancel
       </button>
     </footer>
   </div>
 </div>
 
-<div class="modal" [class.is-active]="isRetryModalActive">
+<div class="modal" [class.is-active]="isRetryModalActive()">
   <div class="modal-background"></div>
   <div class="modal-card">
     <header class="modal-card-head">
@@ -169,7 +175,7 @@
         This action will delete all the torrent data + all local downloads. Then it will re-add the original magnet link
         or torrent file to the debrid provider.
       </p>
-      @if (retryError?.length > 0) {
+      @if (retryError(); as retryError) {
         <div class="notification is-danger is-light">Error retrying torrent: {{ retryError }}</div>
       }
     </section>
@@ -177,19 +183,19 @@
       <button
         class="button is-success"
         (click)="retryOk()"
-        [disabled]="retrying"
-        [ngClass]="{ 'is-loading': retrying }"
+        [disabled]="retrying()"
+        [ngClass]="{ 'is-loading': retrying() }"
       >
         Retry selected
       </button>
-      <button class="button" (click)="retryCancel()" [disabled]="retrying" [ngClass]="{ 'is-loading': retrying }">
+      <button class="button" (click)="retryCancel()" [disabled]="retrying()" [ngClass]="{ 'is-loading': retrying() }">
         Cancel
       </button>
     </footer>
   </div>
 </div>
 
-<div class="modal" [class.is-active]="isChangeSettingsModalActive">
+<div class="modal" [class.is-active]="isChangeSettingsModalActive()">
   <div class="modal-background"></div>
   <div class="modal-card">
     <header class="modal-card-head">
@@ -297,7 +303,7 @@
         </p>
       </div>
 
-      @if (changeSettingsError?.length > 0) {
+      @if (changeSettingsError(); as changeSettingsError) {
         <div class="notification is-danger is-light">Error changing settings: {{ changeSettingsError }}</div>
       }
     </section>
@@ -305,16 +311,16 @@
       <button
         class="button is-success"
         (click)="changeSettingsOk()"
-        [disabled]="changingSettings"
-        [ngClass]="{ 'is-loading': changingSettings }"
+        [disabled]="changingSettings()"
+        [ngClass]="{ 'is-loading': changingSettings() }"
       >
         Save
       </button>
       <button
         class="button"
         (click)="changeSettingsCancel()"
-        [disabled]="changingSettings"
-        [ngClass]="{ 'is-loading': changingSettings }"
+        [disabled]="changingSettings()"
+        [ngClass]="{ 'is-loading': changingSettings() }"
       >
         Cancel
       </button>

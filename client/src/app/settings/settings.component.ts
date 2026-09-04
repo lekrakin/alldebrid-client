@@ -1,6 +1,6 @@
 import { NgClass, KeyValuePipe } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { finalize, switchMap, tap } from 'rxjs';
 import { SettingsService } from 'src/app/settings.service';
@@ -23,35 +23,35 @@ export class SettingsComponent implements OnInit {
   public readonly diagnosticsView = 'diagnostics';
   public readonly accountView = 'account';
 
-  public activeView = '';
-  public loading = true;
-  public loadError: string = null;
+  public readonly activeView = signal('');
+  public readonly loading = signal(true);
+  public readonly loadError = signal<string | null>(null);
 
-  public profileUsername: string;
-  public profilePassword: string;
-  public profileSaving = false;
-  public profileSuccess = false;
-  public profileError: string = null;
+  public readonly profileUsername = signal('');
+  public readonly profilePassword = signal('');
+  public readonly profileSaving = signal(false);
+  public readonly profileSuccess = signal(false);
+  public readonly profileError = signal<string | null>(null);
 
-  public tabs: Setting[] = [];
+  public readonly tabs = signal<Setting[]>([]);
   private settingMap = new Map<string, Setting>();
   private visibleSecrets = new Set<string>();
 
-  public settingsSaving = false;
-  public settingsSaveSuccess = false;
-  public settingsSaveError: string = null;
+  public readonly settingsSaving = signal(false);
+  public readonly settingsSaveSuccess = signal(false);
+  public readonly settingsSaveError = signal<string | null>(null);
 
-  public pathTesting = false;
-  public testPathError: string = null;
-  public testPathSuccess = false;
+  public readonly pathTesting = signal(false);
+  public readonly testPathError = signal<string | null>(null);
+  public readonly testPathSuccess = signal(false);
 
-  public downloadSpeedTesting = false;
-  public testDownloadSpeedError: string = null;
-  public testDownloadSpeedSuccess: number = null;
+  public readonly downloadSpeedTesting = signal(false);
+  public readonly testDownloadSpeedError = signal<string | null>(null);
+  public readonly testDownloadSpeedSuccess = signal<number | null>(null);
 
-  public writeSpeedTesting = false;
-  public testWriteSpeedError: string = null;
-  public testWriteSpeedSuccess: number = null;
+  public readonly writeSpeedTesting = signal(false);
+  public readonly testWriteSpeedError = signal<string | null>(null);
+  public readonly testWriteSpeedSuccess = signal<number | null>(null);
 
   public canRegisterMagnetHandler = false;
   public magnetHandlerSuccess = false;
@@ -63,56 +63,59 @@ export class SettingsComponent implements OnInit {
   }
 
   public loadSettings(): void {
-    this.loading = true;
-    this.loadError = null;
+    this.loading.set(true);
+    this.loadError.set(null);
 
     this.settingsService
       .get()
-      .pipe(finalize(() => (this.loading = false)))
+      .pipe(finalize(() => this.loading.set(false)))
       .subscribe({
         next: (settings) => this.applySettings(settings),
         error: (error) => {
-          this.loadError = this.getErrorMessage(error, 'Settings could not be loaded.');
+          this.loadError.set(this.getErrorMessage(error, 'Settings could not be loaded.'));
         },
       });
   }
 
   private applySettings(settings: Setting[]): void {
-    this.tabs = settings.filter((setting) => !setting.key.includes(':'));
+    const tabs = settings.filter((setting) => !setting.key.includes(':'));
 
-    for (const tab of this.tabs) {
+    for (const tab of tabs) {
       const prefix = `${tab.key}:`;
       tab.settings = settings.filter((setting) => setting.key.startsWith(prefix));
     }
 
     this.settingMap = new Map(settings.map((setting) => [setting.key, setting]));
     this.visibleSecrets.clear();
+    this.tabs.set(tabs);
 
-    if (!this.activeView || !this.isKnownView(this.activeView)) {
-      this.activeView = this.tabs[0]?.key ?? this.diagnosticsView;
+    if (!this.activeView() || !this.isKnownView(this.activeView())) {
+      this.activeView.set(tabs[0]?.key ?? this.diagnosticsView);
     }
   }
 
   private isKnownView(view: string): boolean {
-    return view === this.diagnosticsView || view === this.accountView || this.tabs.some((tab) => tab.key === view);
+    return view === this.diagnosticsView || view === this.accountView || this.tabs().some((tab) => tab.key === view);
   }
 
   public selectView(view: string): void {
-    this.activeView = view;
-    this.settingsSaveError = null;
-    this.settingsSaveSuccess = false;
+    this.activeView.set(view);
+    this.settingsSaveError.set(null);
+    this.settingsSaveSuccess.set(false);
   }
 
   public saveSettings(): void {
-    if (this.settingsSaving) {
+    if (this.settingsSaving()) {
       return;
     }
 
-    this.settingsSaving = true;
-    this.settingsSaveSuccess = false;
-    this.settingsSaveError = null;
+    this.settingsSaving.set(true);
+    this.settingsSaveSuccess.set(false);
+    this.settingsSaveError.set(null);
 
-    const settingsToSave = this.tabs.flatMap((tab) => tab.settings).filter((setting) => setting.type !== 'Object');
+    const settingsToSave = this.tabs()
+      .flatMap((tab) => tab.settings)
+      .filter((setting) => setting.type !== 'Object');
     let updateCompleted = false;
 
     this.settingsService
@@ -120,18 +123,18 @@ export class SettingsComponent implements OnInit {
       .pipe(
         tap(() => (updateCompleted = true)),
         switchMap(() => this.settingsService.get()),
-        finalize(() => (this.settingsSaving = false))
+        finalize(() => this.settingsSaving.set(false))
       )
       .subscribe({
         next: (settings) => {
           this.applySettings(settings);
-          this.settingsSaveSuccess = true;
+          this.settingsSaveSuccess.set(true);
         },
         error: (error) => {
           const fallback = updateCompleted
             ? 'Settings were saved, but the current values could not be reloaded.'
             : 'Settings could not be saved.';
-          this.settingsSaveError = this.getErrorMessage(error, fallback);
+          this.settingsSaveError.set(this.getErrorMessage(error, fallback));
         },
       });
   }
@@ -143,55 +146,55 @@ export class SettingsComponent implements OnInit {
   public testDownloadPath(): void {
     const downloadPath = this.getSetting('Storage:DownloadPath');
 
-    this.pathTesting = true;
-    this.testPathError = null;
-    this.testPathSuccess = false;
+    this.pathTesting.set(true);
+    this.testPathError.set(null);
+    this.testPathSuccess.set(false);
 
     this.settingsService
       .testPath(downloadPath)
-      .pipe(finalize(() => (this.pathTesting = false)))
+      .pipe(finalize(() => this.pathTesting.set(false)))
       .subscribe({
         next: () => {
-          this.testPathSuccess = true;
+          this.testPathSuccess.set(true);
         },
         error: (error) => {
-          this.testPathError = this.getErrorMessage(error, 'The download path could not be tested.');
+          this.testPathError.set(this.getErrorMessage(error, 'The download path could not be tested.'));
         },
       });
   }
 
   public testDownloadSpeed(): void {
-    this.downloadSpeedTesting = true;
-    this.testDownloadSpeedError = null;
-    this.testDownloadSpeedSuccess = null;
+    this.downloadSpeedTesting.set(true);
+    this.testDownloadSpeedError.set(null);
+    this.testDownloadSpeedSuccess.set(null);
 
     this.settingsService
       .testDownloadSpeed()
-      .pipe(finalize(() => (this.downloadSpeedTesting = false)))
+      .pipe(finalize(() => this.downloadSpeedTesting.set(false)))
       .subscribe({
         next: (result) => {
-          this.testDownloadSpeedSuccess = result;
+          this.testDownloadSpeedSuccess.set(result);
         },
         error: (error) => {
-          this.testDownloadSpeedError = this.getErrorMessage(error, 'The download speed test failed.');
+          this.testDownloadSpeedError.set(this.getErrorMessage(error, 'The download speed test failed.'));
         },
       });
   }
 
   public testWriteSpeed(): void {
-    this.writeSpeedTesting = true;
-    this.testWriteSpeedError = null;
-    this.testWriteSpeedSuccess = null;
+    this.writeSpeedTesting.set(true);
+    this.testWriteSpeedError.set(null);
+    this.testWriteSpeedSuccess.set(null);
 
     this.settingsService
       .testWriteSpeed()
-      .pipe(finalize(() => (this.writeSpeedTesting = false)))
+      .pipe(finalize(() => this.writeSpeedTesting.set(false)))
       .subscribe({
         next: (result) => {
-          this.testWriteSpeedSuccess = result;
+          this.testWriteSpeedSuccess.set(result);
         },
         error: (error) => {
-          this.testWriteSpeedError = this.getErrorMessage(error, 'The write speed test failed.');
+          this.testWriteSpeedError.set(this.getErrorMessage(error, 'The write speed test failed.'));
         },
       });
   }
@@ -231,26 +234,26 @@ export class SettingsComponent implements OnInit {
   }
 
   public saveProfile(): void {
-    if (this.profileSaving || (!this.profileUsername && !this.profilePassword)) {
+    if (this.profileSaving() || (!this.profileUsername() && !this.profilePassword())) {
       return;
     }
 
-    this.profileSuccess = false;
-    this.profileError = null;
-    this.profileSaving = true;
+    this.profileSuccess.set(false);
+    this.profileError.set(null);
+    this.profileSaving.set(true);
 
     this.authService
-      .update(this.profileUsername, this.profilePassword)
-      .pipe(finalize(() => (this.profileSaving = false)))
+      .update(this.profileUsername(), this.profilePassword())
+      .pipe(finalize(() => this.profileSaving.set(false)))
       .subscribe({
         next: () => {
-          this.profileUsername = '';
-          this.profilePassword = '';
-          this.profileSuccess = true;
+          this.profileUsername.set('');
+          this.profilePassword.set('');
+          this.profileSuccess.set(true);
         },
         error: (error) => {
-          this.profileError = this.getErrorMessage(error, 'Account credentials could not be updated.');
-          this.profileSuccess = false;
+          this.profileError.set(this.getErrorMessage(error, 'Account credentials could not be updated.'));
+          this.profileSuccess.set(false);
         },
       });
   }

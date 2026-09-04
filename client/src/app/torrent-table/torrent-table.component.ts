@@ -1,4 +1,4 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnInit, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router } from '@angular/router';
 import { Torrent } from '../models/torrent.model';
@@ -22,28 +22,28 @@ export class TorrentTableComponent implements OnInit {
   private router = inject(Router);
   private torrentService = inject(TorrentService);
 
-  public torrents: Torrent[] = [];
-  public selectedTorrents: string[] = [];
-  public error: string;
+  public readonly torrents = signal<Torrent[]>([]);
+  public readonly selectedTorrents = signal<string[]>([]);
+  public readonly error = signal<string | null>(null);
   public sortProperty = 'rdName';
   public sortDirection: 'asc' | 'desc' = 'asc';
   public filterText = '';
 
-  public isDeleteModalActive: boolean;
-  public deleteError: string;
-  public deleting: boolean;
+  public readonly isDeleteModalActive = signal(false);
+  public readonly deleteError = signal<string | null>(null);
+  public readonly deleting = signal(false);
   public deleteSelectAll: boolean;
   public deleteData: boolean;
   public deleteRdTorrent: boolean;
   public deleteLocalFiles: boolean;
 
-  public isRetryModalActive: boolean;
-  public retryError: string;
-  public retrying: boolean;
+  public readonly isRetryModalActive = signal(false);
+  public readonly retryError = signal<string | null>(null);
+  public readonly retrying = signal(false);
 
-  public isChangeSettingsModalActive: boolean;
-  public changeSettingsError: string;
-  public changingSettings: boolean;
+  public readonly isChangeSettingsModalActive = signal(false);
+  public readonly changeSettingsError = signal<string | null>(null);
+  public readonly changingSettings = signal(false);
 
   public updateSettingsDownloadClient: number;
   public updateSettingsHostDownloadAction: number;
@@ -58,17 +58,17 @@ export class TorrentTableComponent implements OnInit {
     const torrentService = this.torrentService;
 
     torrentService.update$.pipe(takeUntilDestroyed()).subscribe((result) => {
-      this.torrents = result;
+      this.torrents.set(result);
     });
   }
 
   ngOnInit(): void {
     this.torrentService.getList().subscribe({
       next: (result) => {
-        this.torrents = result;
+        this.torrents.set(result);
       },
       error: (err) => {
-        this.error = err.error;
+        this.error.set(err.error);
       },
     });
   }
@@ -93,98 +93,95 @@ export class TorrentTableComponent implements OnInit {
   }
 
   public toggleDeleteSelectAll(event: Event) {
-    this.selectedTorrents = [];
+    const selectedTorrents = (event.target as HTMLInputElement).checked
+      ? this.torrents().map((torrent) => torrent.torrentId)
+      : [];
 
-    if ((event.target as HTMLInputElement).checked) {
-      this.torrents.forEach((torrent) => {
-        this.selectedTorrents.push(torrent.torrentId);
-      });
-    }
+    this.selectedTorrents.set(selectedTorrents);
   }
 
   public toggleSelect(torrentId: string) {
-    const index = this.selectedTorrents.indexOf(torrentId);
-
-    if (index > -1) {
-      this.selectedTorrents.splice(index, 1);
-    } else {
-      this.selectedTorrents.push(torrentId);
-    }
+    this.selectedTorrents.update((selectedTorrents) =>
+      selectedTorrents.includes(torrentId)
+        ? selectedTorrents.filter((selectedTorrentId) => selectedTorrentId !== torrentId)
+        : [...selectedTorrents, torrentId]
+    );
   }
 
   public showDeleteModal(): void {
     this.deleteData = false;
     this.deleteRdTorrent = false;
     this.deleteLocalFiles = false;
-    this.deleteError = null;
+    this.deleteError.set(null);
 
-    this.isDeleteModalActive = true;
+    this.isDeleteModalActive.set(true);
   }
 
   public deleteCancel(): void {
-    this.isDeleteModalActive = false;
+    this.isDeleteModalActive.set(false);
   }
 
   public deleteOk(): void {
-    this.deleting = true;
+    this.deleting.set(true);
 
     const calls: Observable<void>[] = [];
 
-    this.selectedTorrents.forEach((torrentId) => {
+    this.selectedTorrents().forEach((torrentId) => {
       calls.push(this.torrentService.delete(torrentId, this.deleteData, this.deleteRdTorrent, this.deleteLocalFiles));
     });
 
     forkJoin(calls).subscribe({
       complete: () => {
-        this.isDeleteModalActive = false;
-        this.deleting = false;
+        this.isDeleteModalActive.set(false);
+        this.deleting.set(false);
 
-        this.selectedTorrents = [];
+        this.selectedTorrents.set([]);
       },
       error: (err) => {
-        this.deleteError = err.error;
-        this.deleting = false;
+        this.deleteError.set(err.error);
+        this.deleting.set(false);
       },
     });
   }
 
   public showRetryModal(): void {
-    this.retryError = null;
+    this.retryError.set(null);
 
-    this.isRetryModalActive = true;
+    this.isRetryModalActive.set(true);
   }
 
   public retryCancel(): void {
-    this.isRetryModalActive = false;
+    this.isRetryModalActive.set(false);
   }
 
   public retryOk(): void {
-    this.retrying = true;
+    this.retrying.set(true);
 
     const calls: Observable<void>[] = [];
 
-    this.selectedTorrents.forEach((torrentId) => {
+    this.selectedTorrents().forEach((torrentId) => {
       calls.push(this.torrentService.retry(torrentId));
     });
 
     forkJoin(calls).subscribe({
       complete: () => {
-        this.isRetryModalActive = false;
-        this.retrying = false;
+        this.isRetryModalActive.set(false);
+        this.retrying.set(false);
 
-        this.selectedTorrents = [];
+        this.selectedTorrents.set([]);
       },
       error: (err) => {
-        this.retryError = err.error;
-        this.retrying = false;
+        this.retryError.set(err.error);
+        this.retrying.set(false);
       },
     });
   }
 
   public changeSettingsModal(): void {
-    this.changeSettingsError = null;
+    this.changeSettingsError.set(null);
 
-    const selected = this.torrents.filter((m) => this.selectedTorrents.includes(m.torrentId));
+    const selectedTorrents = this.selectedTorrents();
+    const selected = this.torrents().filter((torrent) => selectedTorrents.includes(torrent.torrentId));
     const cv = <V>(getter: (t: Torrent) => V) => this.consensus(selected, getter);
 
     this.updateSettingsDownloadClient = cv((m) => m.downloadClient);
@@ -196,7 +193,7 @@ export class TorrentTableComponent implements OnInit {
     this.updateSettingsDeleteOnError = cv((m) => m.deleteOnError);
     this.updateSettingsTorrentLifetime = cv((m) => m.lifetime);
 
-    this.isChangeSettingsModalActive = true;
+    this.isChangeSettingsModalActive.set(true);
   }
 
   private consensus<V>(items: Torrent[], getter: (item: Torrent) => V): V | null {
@@ -205,15 +202,16 @@ export class TorrentTableComponent implements OnInit {
   }
 
   public changeSettingsCancel(): void {
-    this.isChangeSettingsModalActive = false;
+    this.isChangeSettingsModalActive.set(false);
   }
 
   public changeSettingsOk(): void {
-    this.changingSettings = true;
+    this.changingSettings.set(true);
 
     const calls: Observable<void>[] = [];
 
-    const selectedTorrents = this.torrents.filter((m) => this.selectedTorrents.indexOf(m.torrentId) > -1);
+    const selectedTorrentIds = this.selectedTorrents();
+    const selectedTorrents = this.torrents().filter((torrent) => selectedTorrentIds.includes(torrent.torrentId));
 
     selectedTorrents.forEach((torrent) => {
       if (this.updateSettingsDownloadClient != null) {
@@ -246,14 +244,14 @@ export class TorrentTableComponent implements OnInit {
 
     forkJoin(calls).subscribe({
       complete: () => {
-        this.isChangeSettingsModalActive = false;
-        this.changingSettings = false;
+        this.isChangeSettingsModalActive.set(false);
+        this.changingSettings.set(false);
 
-        this.selectedTorrents = [];
+        this.selectedTorrents.set([]);
       },
       error: (err) => {
-        this.changeSettingsError = err.error;
-        this.changingSettings = false;
+        this.changeSettingsError.set(err.error);
+        this.changingSettings.set(false);
       },
     });
   }

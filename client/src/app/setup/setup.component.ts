@@ -1,4 +1,4 @@
-import { Component, inject } from '@angular/core';
+import { Component, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { AuthService } from '../auth.service';
 import { NgClass } from '@angular/common';
@@ -18,39 +18,39 @@ export class SetupComponent {
   public password: string;
   public token: string;
 
-  public error: string;
-  public working: boolean;
+  public readonly error = signal<string | null>(null);
+  public readonly working = signal(false);
 
-  public step: number = 1;
+  public readonly step = signal(1);
 
   public setup(): void {
-    this.error = null;
-    this.working = true;
+    this.error.set(null);
+    this.working.set(true);
 
     this.authService.create(this.userName, this.password).subscribe({
-      next: () => {
-        this.step = 2;
-        this.working = false;
+      next: (response) => {
+        this.step.set(response.providerConfigured ? 3 : 2);
+        this.working.set(false);
       },
       error: (err) => {
-        this.working = false;
-        this.error = err.error;
+        this.working.set(false);
+        this.error.set(err.error);
       },
     });
   }
 
   public setToken(): void {
-    this.working = true;
-    this.error = null;
+    this.working.set(true);
+    this.error.set(null);
 
     this.authService.setupProvider(this.token).subscribe({
       next: () => {
-        this.step = 3;
-        this.working = false;
+        this.step.set(3);
+        this.working.set(false);
       },
       error: (err: any) => {
-        this.working = false;
-        this.error = err.error;
+        this.working.set(false);
+        this.error.set(err.error);
       },
     });
   }

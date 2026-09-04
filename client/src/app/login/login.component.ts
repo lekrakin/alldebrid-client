@@ -1,4 +1,4 @@
-import { Component, inject } from '@angular/core';
+import { Component, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { AuthService } from '../auth.service';
 import { FormsModule } from '@angular/forms';
@@ -16,8 +16,8 @@ export class LoginComponent {
 
   public userName: string;
   public password: string;
-  public error: string;
-  public loggingIn: boolean;
+  public readonly error = signal<string | null>(null);
+  public readonly loggingIn = signal(false);
 
   public setUserName(event: Event): void {
     this.userName = (event.target as any).value;
@@ -28,13 +28,13 @@ export class LoginComponent {
   }
 
   public login(): void {
-    this.error = null;
-    this.loggingIn = true;
+    this.error.set(null);
+    this.loggingIn.set(true);
     this.authService.login(this.userName, this.password).subscribe({
       next: () => this.router.navigate(['/torrents']),
       error: (err) => {
-        this.loggingIn = false;
-        this.error = err.error;
+        this.loggingIn.set(false);
+        this.error.set(err.error);
       },
     });
   }

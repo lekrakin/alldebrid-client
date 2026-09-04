@@ -1,3 +1,5 @@
+@let torrent = torrentState();
+
 <div class="tabs">
   <ul>
     <li [ngClass]="{ 'is-active': activeTab === 0 }" (click)="activeTab = 0">
@@ -433,7 +435,7 @@
   </div>
 }
 
-<div class="modal" [class.is-active]="isDeleteModalActive">
+<div class="modal" [class.is-active]="isDeleteModalActive()">
   <div class="modal-background"></div>
   <div class="modal-card">
     <header class="modal-card-head">
@@ -470,7 +472,7 @@
       <div class="notification is-primary">
         Deleting a torrent from AllDebrid will automatically delete it here too.
       </div>
-      @if (deleteError?.length > 0) {
+      @if (deleteError(); as deleteError) {
         <div class="notification is-danger is-light">Error deleting torrent: {{ deleteError }}</div>
       }
     </section>
@@ -478,19 +480,19 @@
       <button
         class="button is-success"
         (click)="deleteOk()"
-        [disabled]="deleting"
-        [ngClass]="{ 'is-loading': deleting }"
+        [disabled]="deleting()"
+        [ngClass]="{ 'is-loading': deleting() }"
       >
         Delete
       </button>
-      <button class="button" (click)="deleteCancel()" [disabled]="deleting" [ngClass]="{ 'is-loading': deleting }">
+      <button class="button" (click)="deleteCancel()" [disabled]="deleting()" [ngClass]="{ 'is-loading': deleting() }">
         Cancel
       </button>
     </footer>
   </div>
 </div>
 
-<div class="modal" [class.is-active]="isRetryModalActive">
+<div class="modal" [class.is-active]="isRetryModalActive()">
   <div class="modal-background"></div>
   <div class="modal-card">
     <header class="modal-card-head">
@@ -503,7 +505,7 @@
         This action will delete all the torrent data + all local downloads. Then it will re-add the original magnet link
         or torrent file to AllDebrid.
       </p>
-      @if (retryError?.length > 0) {
+      @if (retryError(); as retryError) {
         <div class="notification is-danger is-light">Error retrying torrent: {{ retryError }}</div>
       }
     </section>
@@ -511,19 +513,19 @@
       <button
         class="button is-success"
         (click)="retryOk()"
-        [disabled]="retrying"
-        [ngClass]="{ 'is-loading': retrying }"
+        [disabled]="retrying()"
+        [ngClass]="{ 'is-loading': retrying() }"
       >
         Retry
       </button>
-      <button class="button" (click)="retryCancel()" [disabled]="retrying" [ngClass]="{ 'is-loading': retrying }">
+      <button class="button" (click)="retryCancel()" [disabled]="retrying()" [ngClass]="{ 'is-loading': retrying() }">
         Cancel
       </button>
     </footer>
   </div>
 </div>
 
-<div class="modal" [class.is-active]="isDownloadRetryModalActive">
+<div class="modal" [class.is-active]="isDownloadRetryModalActive()">
   <div class="modal-background"></div>
   <div class="modal-card">
     <header class="modal-card-head">
@@ -533,7 +535,7 @@
     <section class="modal-card-body">
       <p>Are you sure you want to retry this download?</p>
       <p>This action will remove the local download and re-download the file from AllDebrid.</p>
-      @if (downloadRetryError?.length > 0) {
+      @if (downloadRetryError(); as downloadRetryError) {
         <div class="notification is-danger is-light">Error retrying download: {{ downloadRetryError }}</div>
       }
     </section>
@@ -541,16 +543,16 @@
       <button
         class="button is-success"
         (click)="downloadRetryOk()"
-        [disabled]="downloadRetrying"
-        [ngClass]="{ 'is-loading': downloadRetrying }"
+        [disabled]="downloadRetrying()"
+        [ngClass]="{ 'is-loading': downloadRetrying() }"
       >
         Retry
       </button>
       <button
         class="button"
         (click)="downloadRetryCancel()"
-        [disabled]="downloadRetrying"
-        [ngClass]="{ 'is-loading': downloadRetrying }"
+        [disabled]="downloadRetrying()"
+        [ngClass]="{ 'is-loading': downloadRetrying() }"
       >
         Cancel
       </button>
@@ -558,7 +560,7 @@
   </div>
 </div>
 
-<div class="modal" [class.is-active]="isUpdateSettingsModalActive">
+<div class="modal" [class.is-active]="isUpdateSettingsModalActive()">
   <div class="modal-background"></div>
   <div class="modal-card">
     <header class="modal-card-head">
@@ -674,16 +676,16 @@
       <button
         class="button is-success"
         (click)="updateSettingsOk()"
-        [disabled]="updating"
-        [ngClass]="{ 'is-loading': updating }"
+        [disabled]="updating()"
+        [ngClass]="{ 'is-loading': updating() }"
       >
         Save
       </button>
       <button
         class="button"
         (click)="updateSettingsCancel()"
-        [disabled]="updating"
-        [ngClass]="{ 'is-loading': updating }"
+        [disabled]="updating()"
+        [ngClass]="{ 'is-loading': updating() }"
       >
         Cancel
       </button>

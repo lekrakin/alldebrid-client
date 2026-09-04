@@ -4,7 +4,7 @@
       <div class="columns is-centered">
         <div class="column is-5-tablet is-5-desktop is-5-widescreen">
           <img src="assets/logo.png" />
-          @if (step === 1) {
+          @if (step() === 1) {
             <div class="box">
               <div class="notification is-primary">
                 Welcome to AllDebrid Client. Please create your account by entering a username and password.
@@ -44,11 +44,11 @@
                   </div>
                 </div>
                 <div class="field">
-                  <button class="button is-success" [ngClass]="{ 'is-loading': working }" [disabled]="working">
+                  <button class="button is-success" [ngClass]="{ 'is-loading': working() }" [disabled]="working()">
                     Setup
                   </button>
                 </div>
-                @if (error?.length > 0) {
+                @if (error(); as error) {
                   <div class="notification is-danger is-light">
                     {{ error }}
                   </div>
@@ -57,7 +57,7 @@
             </div>
           }
 
-          @if (step === 2) {
+          @if (step() === 2) {
             <div class="box">
               <div class="notification is-primary">
                 AllDebrid Client requires an AllDebrid account with an active premium subscription.
@@ -90,13 +90,13 @@
                 <button
                   class="button is-success"
                   (click)="setToken()"
-                  [ngClass]="{ 'is-loading': working }"
-                  [disabled]="working"
+                  [ngClass]="{ 'is-loading': working() }"
+                  [disabled]="working()"
                 >
                   Setup
                 </button>
               </div>
-              @if (error?.length > 0) {
+              @if (error(); as error) {
                 <div class="notification is-danger is-light">
                   {{ error }}
                 </div>
@@ -104,20 +104,23 @@
             </div>
           }
 
-          @if (step === 3) {
+          @if (step() === 3) {
             <div class="box">
               <div class="notification is-primary">
-                You are now connected to AllDebrid. For Radarr or Sonarr setup, follow the project documentation:
-                <a href="https://github.com/krakn-dev/alldebrid-client/" target="_blank" rel="noopener"
-                  >https://github.com/krakn-dev/alldebrid-client/</a
+                You are now connected to AllDebrid. For Radarr or Sonarr setup, follow the integration guide:
+                <a
+                  href="https://github.com/krakn-dev/alldebrid-client/blob/main/docs/integrations.md"
+                  target="_blank"
+                  rel="noopener"
+                  >Integration guide</a
                 >.
               </div>
               <div class="field">
                 <button
                   class="button is-success"
                   (click)="close()"
-                  [ngClass]="{ 'is-loading': working }"
-                  [disabled]="working"
+                  [ngClass]="{ 'is-loading': working() }"
+                  [disabled]="working()"
                 >
                   OK
                 </button>

@@ -43,13 +43,13 @@
                 <button
                   class="button is-success"
                   type="submit"
-                  [ngClass]="{ 'is-loading': loggingIn }"
-                  [disabled]="loggingIn"
+                  [ngClass]="{ 'is-loading': loggingIn() }"
+                  [disabled]="loggingIn()"
                 >
                   Login
                 </button>
               </div>
-              @if (error?.length > 0) {
+              @if (error(); as error) {
                 <div class="notification is-danger is-light">
                   {{ error }}
                 </div>

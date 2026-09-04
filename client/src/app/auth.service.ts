@@ -1,7 +1,11 @@
 import { APP_BASE_HREF } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import { Observable } from 'rxjs/internal/Observable';
+import { Observable } from 'rxjs';
+
+export interface AuthCreateResponse {
+  providerConfigured: boolean;
+}
 
 @Injectable({
   providedIn: 'root',
@@ -14,8 +18,8 @@ export class AuthService {
     return this.http.get<boolean>(`${this.baseHref}Api/Authentication/IsLoggedIn`);
   }
 
-  public create(userName: string, password: string): Observable<void> {
-    return this.http.post<void>(`${this.baseHref}Api/Authentication/Create`, {
+  public create(userName: string, password: string): Observable<AuthCreateResponse> {
+    return this.http.post<AuthCreateResponse>(`${this.baseHref}Api/Authentication/Create`, {
       userName,
       password,
     });

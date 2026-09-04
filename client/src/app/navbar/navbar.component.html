@@ -8,9 +8,9 @@
       role="button"
       class="navbar-burger burger"
       aria-label="menu"
-      aria-expanded="false"
-      [class.is-active]="showMobileMenu"
-      (click)="showMobileMenu = !showMobileMenu"
+      [attr.aria-expanded]="showMobileMenu()"
+      [class.is-active]="showMobileMenu()"
+      (click)="toggleMobileMenu()"
     >
       <span aria-hidden="true"></span>
       <span aria-hidden="true"></span>
@@ -18,7 +18,7 @@
     </a>
   </div>
 
-  <div class="navbar-menu" [class.is-active]="showMobileMenu">
+  <div class="navbar-menu" [class.is-active]="showMobileMenu()">
     <div class="navbar-start">
       <a class="navbar-item" routerLink="/torrents">
         <span class="icon">
@@ -38,14 +38,14 @@
         </span>
         <span>Settings</span>
       </a>
-      @if (profile) {
+      @if (profile(); as profile) {
         <a class="navbar-item" href="{{ providerLink }}" target="_blank" rel="noopener">
-          @if (premiumDays > 0) {
-            <span>Premium: {{ premiumDays }} Days</span>
+          @if (premiumDays() > 0) {
+            <span>Premium: {{ premiumDays() }} Days</span>
           } @else {
             <span>Premium: Expired</span>
           }
-          <span class="premium-dot" [class.active]="premiumDays > 0"></span>
+          <span class="premium-dot" [class.active]="premiumDays() > 0"></span>
         </a>
       }
     </div>
@@ -57,20 +57,22 @@
         rel="noopener"
         class="navbar-item has-text-grey"
       >
-        v{{ version }}
+        v{{ version() }}
       </a>
       <a class="navbar-item" (click)="logout()">Logout</a>
     </div>
   </div>
 </nav>
 
-@if (profile && !profile.disableUpdateNotification && profile.updateAvailable) {
-  <div class="notification is-warning">
-    <span>
-      AllDebrid Client {{ profile.latestVersion }} is available. You are currently on {{ profile.currentVersion }}.
-    </span>
-    <a href="https://github.com/krakn-dev/alldebrid-client/releases/latest" target="_blank" rel="noopener">
-      View release
-    </a>
-  </div>
+@if (profile(); as profile) {
+  @if (!profile.disableUpdateNotification && profile.updateAvailable) {
+    <div class="notification is-warning">
+      <span>
+        AllDebrid Client {{ profile.latestVersion }} is available. You are currently on {{ profile.currentVersion }}.
+      </span>
+      <a href="https://github.com/krakn-dev/alldebrid-client/releases/latest" target="_blank" rel="noopener">
+        View release
+      </a>
+    </div>
+  }
 }
