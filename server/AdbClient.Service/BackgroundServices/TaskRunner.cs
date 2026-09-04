@@ -1,4 +1,3 @@
-﻿using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -18,11 +17,11 @@ public class TaskRunner(ILogger<TaskRunner> logger, IServiceProvider serviceProv
 
         using var scope = serviceProvider.CreateScope();
         var torrentRunner = scope.ServiceProvider.GetRequiredService<TorrentRunner>();
-            
+
         logger.LogInformation("TaskRunner started.");
 
         await torrentRunner.Initialize();
-            
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -33,21 +32,9 @@ public class TaskRunner(ILogger<TaskRunner> logger, IServiceProvider serviceProv
             {
                 foreach (var entry in ex.Entries)
                 {
-                    try
-                    {
-                        var proposedValues = entry.CurrentValues;
-                        var databaseValues = await entry.GetDatabaseValuesAsync(stoppingToken);
-
-                        logger.LogWarning("DbUpdateConcurrencyException occurred:");
-                        logger.LogWarning("Proposed Values:");
-                        logger.LogWarning(JsonSerializer.Serialize(proposedValues));
-                        logger.LogWarning("Database Values:");
-                        logger.LogWarning(JsonSerializer.Serialize(databaseValues));
-                    }
-                    catch
-                    {
-                        // ignored
-                    }
+                    logger.LogWarning(
+                        "Database concurrency conflict while processing {EntityType}; the next runner tick will reload current state.",
+                        entry.Metadata.ClrType.Name);
                 }
             }
             catch (Exception ex)
