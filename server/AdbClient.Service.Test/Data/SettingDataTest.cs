@@ -17,6 +17,8 @@ public class SettingDataTest
 
         Assert.Equal(1, settings["Downloads:ConcurrentFiles"].Minimum);
         Assert.Equal(16, settings["Downloads:ConnectionsPerFile"].Maximum);
+        Assert.Equal(1, settings["Integrations:CompletionCommand:TimeoutSeconds"].Minimum);
+        Assert.Equal(3600, settings["Integrations:CompletionCommand:TimeoutSeconds"].Maximum);
         Assert.True(settings["Provider:ApiKey"].IsSecret);
         Assert.False(settings["Storage:DownloadPath"].IsSecret);
     }
@@ -328,6 +330,7 @@ public class SettingDataTest
     [InlineData("Downloads:ConnectionsPerFile", 17)]
     [InlineData("Provider:CheckInterval", 4)]
     [InlineData("Downloads:Defaults:TorrentRetryAttempts", 1001)]
+    [InlineData("Integrations:CompletionCommand:TimeoutSeconds", 0)]
     public async Task Update_RejectsOutOfRangeValuesWithoutPersisting(string key, int value)
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");

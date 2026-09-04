@@ -915,7 +915,32 @@ public class Torrents(
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
-        var exited = process.WaitForExit(60000 * 10);
+        var timeoutSeconds = settings.Integrations.CompletionCommand.TimeoutSeconds;
+        var exited = process.WaitForExit(timeoutSeconds * 1000);
+
+        if (!exited)
+        {
+            logger.LogWarning(
+                "Completion command did not exit within {TimeoutSeconds} seconds; terminating its process tree. {TorrentInfo}",
+                timeoutSeconds,
+                torrent.ToLog());
+
+            try
+            {
+                process.Kill(entireProcessTree: true);
+
+                if (!process.WaitForExit(5000))
+                {
+                    logger.LogWarning(
+                        "Completion command termination could not be confirmed within 5 seconds. {TorrentInfo}",
+                        torrent.ToLog());
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Unable to terminate timed-out completion command. {TorrentInfo}", torrent.ToLog());
+            }
+        }
 
         var errors = errorSb.ToString();
         var output = outputSb.ToString();
@@ -928,11 +953,6 @@ public class Torrents(
         if (output.Length > 0)
         {
             Log($"External application exited with output: {output}", torrent);
-        }
-
-        if (!exited)
-        {
-            Log("External application after a 60 second timeout", torrent);
         }
     }
 

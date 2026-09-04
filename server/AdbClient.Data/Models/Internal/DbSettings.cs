@@ -237,6 +237,11 @@ public class DbSettingsCompletionCommand
     [DisplayName("Arguments")]
     [Description("%N: Torrent name  %L: Category  %F: Content path\n%R: Category root  %D: Torrent path  %C: File count\n%Z: Size (bytes)  %I: Info hash")]
     public string? Arguments { get; set; }
+
+    [DisplayName("Timeout (seconds)")]
+    [Description("Maximum time the completion command may run before its process tree is terminated.")]
+    [Range(1, 3600)]
+    public int TimeoutSeconds { get; set; } = 60;
 }
 
 public class DbSettingsWatchFolder

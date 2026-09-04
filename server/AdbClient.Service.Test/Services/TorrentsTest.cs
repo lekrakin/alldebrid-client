@@ -135,6 +135,54 @@ public class TorrentsTest
         Assert.Equal(expectedArguments, mocks.ProcessMock.Object.StartInfo.Arguments);
 
         mocks.ProcessMock.Verify(p => p.Start(), Times.Once);
+        mocks.ProcessMock.Verify(p => p.WaitForExit(60_000), Times.Once);
+    }
+
+    [Theory]
+    [MemberData(nameof(TorrentAndDownload))]
+    public async Task RunTorrentComplete_WhenCommandTimesOut_TerminatesProcessTree(
+        Torrent torrent,
+        List<Download> downloads)
+    {
+        var baseDownloadPath = Path.Combine(Path.GetTempPath(), "adb-test-downloads");
+        var settings = new DbSettings
+        {
+            Integrations = new()
+            {
+                CompletionCommand = new()
+                {
+                    ExecutablePath = "/bin/echo",
+                    TimeoutSeconds = 7
+                }
+            },
+            Storage = new() { DownloadPath = baseDownloadPath }
+        };
+        var mocks = new Mocks();
+        mocks.TorrentDataMock.Setup(t => t.GetById(torrent.TorrentId)).ReturnsAsync(torrent);
+        mocks.DownloadsMock.Setup(d => d.GetForTorrent(torrent.TorrentId)).ReturnsAsync(downloads);
+
+        var torrentPath = Path.Combine(baseDownloadPath, torrent.Category!, torrent.RdName!);
+        var filePath = Path.Combine(torrentPath, downloads[0].FileName!);
+        var fileSystem = new MockFileSystem(new Dictionary<string, MockFileData>
+        {
+            [filePath] = new("Test file")
+        });
+        var service = new TorrentsService(
+            mocks.TorrentsLoggerMock.Object,
+            mocks.TorrentDataMock.Object,
+            mocks.DownloadsMock.Object,
+            mocks.ProcessFactoryMock.Object,
+            fileSystem,
+            mocks.EnricherMock.Object,
+            null!);
+        mocks.ProcessMock.Setup(process => process.WaitForExit(7_000)).Returns(false);
+        mocks.ProcessMock.Setup(process => process.WaitForExit(5_000)).Returns(true);
+
+        await service.RunTorrentComplete(torrent.TorrentId, settings);
+
+        mocks.ProcessMock.Verify(process => process.Kill(true), Times.Once);
+        mocks.ProcessMock.Verify(process => process.WaitForExit(7_000), Times.Once);
+        mocks.ProcessMock.Verify(process => process.WaitForExit(5_000), Times.Once);
     }
 
     [Theory]
