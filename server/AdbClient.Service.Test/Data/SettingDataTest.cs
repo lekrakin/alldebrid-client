@@ -124,6 +124,51 @@ public class SettingDataTest
     }
 
     [Fact]
+    public async Task Seed_MigratesDirect2022SettingsWithoutReplacingUserValues()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<DataContext>()
+                     .UseSqlite(connection)
+                     .Options;
+        await using var dataContext = new DataContext(options);
+        await dataContext.Database.EnsureCreatedAsync();
+
+        (string LegacyKey, string CurrentKey, string Value)[] migrations =
+        [
+            ("DownloadClient:DownloadPath", "Storage:DownloadPath", "/srv/direct-upgrade-downloads"),
+            ("DownloadClient:MappedPath", "Integrations:ReportedDownloadPath", "/media/direct-upgrade-downloads"),
+            ("Provider:Default:Category", "Downloads:Defaults:Category", "provider-import"),
+            ("Provider:Default:OnlyDownloadAvailableFiles", "Downloads:Defaults:OnlyDownloadAvailableFiles", "False"),
+            ("Provider:Default:MinFileSize", "Downloads:Defaults:MinFileSize", "20"),
+            ("Provider:Default:TorrentRetryAttempts", "Downloads:Defaults:TorrentRetryAttempts", "8"),
+            ("Provider:Default:DownloadRetryAttempts", "Downloads:Defaults:DownloadRetryAttempts", "9"),
+            ("Provider:Default:DeleteOnError", "Downloads:Defaults:DeleteOnError", "45"),
+            ("Provider:Default:TorrentLifetime", "Downloads:Defaults:TorrentLifetime", "2880")
+        ];
+
+        dataContext.Settings.AddRange(migrations.Select(migration => new Setting
+        {
+            SettingId = migration.LegacyKey,
+            Value = migration.Value
+        }));
+        await dataContext.SaveChangesAsync();
+        dataContext.ChangeTracker.Clear();
+
+        var settingData = new SettingData(dataContext, Mock.Of<ILogger<SettingData>>());
+        await settingData.Seed();
+
+        var settings = await dataContext.Settings.AsNoTracking().ToDictionaryAsync(setting => setting.SettingId);
+
+        foreach (var migration in migrations)
+        {
+            Assert.DoesNotContain(migration.LegacyKey, settings.Keys);
+            Assert.Equal(migration.Value, settings[migration.CurrentKey].Value);
+        }
+    }
+
+    [Fact]
     public async Task Seed_PrefersCurrentSettingWhenLegacyAndCurrentKeysBothExist()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");

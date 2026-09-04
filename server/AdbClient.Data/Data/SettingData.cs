@@ -31,6 +31,8 @@ public class SettingData(DataContext dataContext, ILogger<SettingData> logger)
             ["DownloadClient:AutoImport"] = "Provider:AutoImport",
             ["DownloadClient:AutoDelete"] = "Provider:AutoDelete",
             ["DownloadClient:MaxParallelDownloads"] = "Provider:ConcurrentTorrents",
+            ["DownloadClient:DownloadPath"] = "Storage:DownloadPath",
+            ["DownloadClient:MappedPath"] = "Integrations:ReportedDownloadPath",
             ["DownloadClient:Default:HostDownloadAction"] = "Downloads:Defaults:HostDownloadAction",
             ["DownloadClient:Default:Category"] = "Downloads:Defaults:Category",
             ["DownloadClient:Default:FinishedAction"] = "Downloads:Defaults:FinishedAction",
@@ -44,6 +46,13 @@ public class SettingData(DataContext dataContext, ILogger<SettingData> logger)
             ["DownloadClient:Default:DeleteOnError"] = "Downloads:Defaults:DeleteOnError",
             ["DownloadClient:Default:TorrentLifetime"] = "Downloads:Defaults:TorrentLifetime",
             ["DownloadClient:Default:Priority"] = "Downloads:Defaults:Priority",
+            ["Provider:Default:Category"] = "Downloads:Defaults:Category",
+            ["Provider:Default:OnlyDownloadAvailableFiles"] = "Downloads:Defaults:OnlyDownloadAvailableFiles",
+            ["Provider:Default:MinFileSize"] = "Downloads:Defaults:MinFileSize",
+            ["Provider:Default:TorrentRetryAttempts"] = "Downloads:Defaults:TorrentRetryAttempts",
+            ["Provider:Default:DownloadRetryAttempts"] = "Downloads:Defaults:DownloadRetryAttempts",
+            ["Provider:Default:DeleteOnError"] = "Downloads:Defaults:DeleteOnError",
+            ["Provider:Default:TorrentLifetime"] = "Downloads:Defaults:TorrentLifetime",
             ["Paths:DownloadPath"] = "Storage:DownloadPath",
             ["Paths:MappedPath"] = "Integrations:ReportedDownloadPath",
             ["Paths:CopyAddedTorrents"] = "Integrations:AddedTorrentCopyPath",
@@ -138,8 +147,8 @@ public class SettingData(DataContext dataContext, ILogger<SettingData> logger)
     public async Task Seed()
     {
         var dbSettings = await dataContext.Settings.ToListAsync();
-        NormalizeLegacyPathDefaults(dbSettings);
         MigrateLegacySettingKeys(dbSettings);
+        NormalizePathDefaults(dbSettings);
 
         var expectedSettings = GetSettings(new DbSettings(), null)
                               .Where(setting => setting.Type != "Object")
@@ -364,12 +373,16 @@ public class SettingData(DataContext dataContext, ILogger<SettingData> logger)
         }
     }
 
-    private static void NormalizeLegacyPathDefaults(IList<Setting> settings)
+    private static void NormalizePathDefaults(IList<Setting> settings)
     {
         const string legacyWindowsDefault = @"C:\Downloads";
 
-        var downloadPath = settings.FirstOrDefault(setting => setting.SettingId == "Paths:DownloadPath");
-        var reportedPath = settings.FirstOrDefault(setting => setting.SettingId == "Paths:MappedPath");
+        var downloadPath = settings.FirstOrDefault(setting => setting.SettingId == "Storage:DownloadPath");
+        var reportedPath = settings.FirstOrDefault(setting =>
+            setting.SettingId == "Integrations:ReportedDownloadPath");
+        var reportedPathIsRedundant = downloadPath != null &&
+                                      reportedPath != null &&
+                                      PathsAreEquivalent(downloadPath.Value, reportedPath.Value);
 
         if (!OperatingSystem.IsWindows() &&
             downloadPath != null &&
@@ -378,11 +391,9 @@ public class SettingData(DataContext dataContext, ILogger<SettingData> logger)
             downloadPath.Value = "/data/downloads";
         }
 
-        if (downloadPath != null &&
-            reportedPath != null &&
-            PathsAreEquivalent(downloadPath.Value, reportedPath.Value))
+        if (reportedPathIsRedundant)
         {
-            reportedPath.Value = null;
+            reportedPath!.Value = null;
         }
     }
 
