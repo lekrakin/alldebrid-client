@@ -1079,8 +1079,8 @@ public class QBittorrentCompatibilityTest
         torrentData.Setup(data => data.GetByHash(torrent.Hash)).ReturnsAsync(torrent);
         torrentData.Setup(data => data.GetById(torrentId)).ReturnsAsync(torrent);
         torrentData.Setup(data => data.Get()).ReturnsAsync([torrent]);
-        torrentData.Setup(data => data.UpdateCategory(torrentId, "logpose-retained"))
-                   .Callback(() => torrent.Category = "logpose-retained")
+        torrentData.Setup(data => data.FinalizeRetainedDeletion(torrentId, true, false, false))
+                   .Callback(() => torrent.QbittorrentHidden = true)
                    .Returns(Task.CompletedTask);
 
         var downloads = new Mock<IDownloads>();
@@ -1089,8 +1089,10 @@ public class QBittorrentCompatibilityTest
         await compatibility.Delete(torrent.Hash, false);
 
         Assert.Empty(await compatibility.GetTorrents("logpose"));
-        Assert.Equal("logpose-retained", Assert.Single(await compatibility.GetTorrents("all")).Category);
-        torrentData.Verify(value => value.UpdateCategory(torrentId, "logpose-retained"), Times.Once);
+        Assert.Empty(await compatibility.GetTorrents("all"));
+        Assert.Equal("logpose", torrent.Category);
+        Assert.True(torrent.QbittorrentHidden);
+        torrentData.Verify(value => value.FinalizeRetainedDeletion(torrentId, true, false, false), Times.Once);
         downloads.Verify(value => value.DeleteForTorrent(It.IsAny<Guid>()), Times.Never);
         torrentData.Verify(value => value.Delete(It.IsAny<Guid>()), Times.Never);
     }
@@ -1126,11 +1128,6 @@ public class QBittorrentCompatibilityTest
             torrent.RdId = "123";
 
             var torrentData = CreateTorrentDataForDelete(torrent);
-            var retainedCategory = $"{category}-retained";
-            torrentData.Setup(data => data.UpdateCategory(torrent.TorrentId, retainedCategory))
-                       .Callback(() => torrent.Category = retainedCategory)
-                       .Returns(Task.CompletedTask);
-
             var downloads = new Mock<IDownloads>();
             var provider = new Mock<IAllDebridNETClient>();
             var providerMagnets = new Mock<IMagnetApi>();
@@ -1147,12 +1144,15 @@ public class QBittorrentCompatibilityTest
             torrentData.Verify(
                 data => data.Delete(torrent.TorrentId),
                 retainsClientRecord ? Times.Never() : Times.Once());
-            downloads.Verify(
-                data => data.DeleteForTorrent(torrent.TorrentId),
-                retainsClientRecord ? Times.Never() : Times.Once());
+            downloads.Verify(data => data.DeleteForTorrent(It.IsAny<Guid>()), Times.Never);
             torrentData.Verify(
-                data => data.UpdateCategory(torrent.TorrentId, retainedCategory),
+                data => data.FinalizeRetainedDeletion(
+                    torrent.TorrentId,
+                    true,
+                    finishedAction == TorrentFinishedAction.RemoveProvider,
+                    false),
                 retainsClientRecord ? Times.Once() : Times.Never());
+            Assert.Equal(category, torrent.Category);
             providerMagnets.Verify(
                 magnets => magnets.DeleteAsync(torrent.RdId, It.IsAny<CancellationToken>()),
                 removesProviderRecord ? Times.Once() : Times.Never());
@@ -1161,6 +1161,78 @@ public class QBittorrentCompatibilityTest
         {
             Settings.Get.Storage.DownloadPath = originalDownloadPath;
         }
+    }
+
+    [Fact]
+    public async Task DeleteWithoutFiles_WhenProviderDeleteFails_LeavesRetainedRecordVisibleAndActionUnconsumed()
+    {
+        var torrent = CreateDeletionTorrent("Job", "payload.mkv");
+        torrent.FinishedAction = TorrentFinishedAction.RemoveProvider;
+        torrent.RdId = "123";
+        var torrentData = CreateTorrentDataForDelete(torrent);
+        var provider = new Mock<IAllDebridNETClient>();
+        var providerMagnets = new Mock<IMagnetApi>();
+        provider.SetupGet(client => client.Magnet).Returns(providerMagnets.Object);
+        providerMagnets.Setup(magnets => magnets.DeleteAsync(torrent.RdId, It.IsAny<CancellationToken>()))
+                       .ThrowsAsync(new AllDebridException("Provider unavailable", "AUTH_BAD_APIKEY"));
+        var compatibility = CreateCompatibility(torrentData: torrentData, allDebridClient: provider);
+
+        await Assert.ThrowsAsync<AllDebridException>(() => compatibility.Delete(torrent.Hash, false));
+
+        Assert.False(torrent.QbittorrentHidden);
+        Assert.Equal(TorrentFinishedAction.RemoveProvider, torrent.FinishedAction);
+        torrentData.Verify(data => data.FinalizeRetainedDeletion(
+            It.IsAny<Guid>(),
+            It.IsAny<bool>(),
+            It.IsAny<bool>(),
+            It.IsAny<bool>()), Times.Never);
+        torrentData.Verify(data => data.Delete(It.IsAny<Guid>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task DeleteWithoutFiles_WhenProviderTorrentIsAlreadyMissing_HidesRecordAndConsumesAction()
+    {
+        var torrent = CreateDeletionTorrent("Job", "payload.mkv");
+        torrent.FinishedAction = TorrentFinishedAction.RemoveProvider;
+        torrent.RdId = "123";
+        var completed = torrent.Completed;
+        var torrentData = CreateTorrentDataForDelete(torrent);
+        var provider = new Mock<IAllDebridNETClient>();
+        var providerMagnets = new Mock<IMagnetApi>();
+        provider.SetupGet(client => client.Magnet).Returns(providerMagnets.Object);
+        providerMagnets.Setup(magnets => magnets.DeleteAsync(torrent.RdId, It.IsAny<CancellationToken>()))
+                       .ThrowsAsync(new AllDebridException("Magnet not found", "MAGNET_INVALID_ID"));
+        var compatibility = CreateCompatibility(torrentData: torrentData, allDebridClient: provider);
+
+        await compatibility.Delete(torrent.Hash, false);
+
+        Assert.True(torrent.QbittorrentHidden);
+        Assert.Equal(TorrentFinishedAction.None, torrent.FinishedAction);
+        Assert.Equal(completed, torrent.Completed);
+        Assert.Null(torrent.Error);
+        torrentData.Verify(data => data.FinalizeRetainedDeletion(torrent.TorrentId, true, true, false), Times.Once);
+    }
+
+    [Fact]
+    public async Task HiddenTorrent_IsAbsentFromEveryQbittorrentRecordOperation()
+    {
+        var torrent = CreateDeletionTorrent("Job", "payload.mkv");
+        torrent.QbittorrentHidden = true;
+        var torrentData = new Mock<ITorrentData>();
+        torrentData.Setup(data => data.Get()).ReturnsAsync([torrent]);
+        torrentData.Setup(data => data.GetByHash(torrent.Hash)).ReturnsAsync(torrent);
+        var compatibility = CreateCompatibility(torrentData: torrentData);
+
+        Assert.Empty(await compatibility.GetTorrents("all"));
+        Assert.Null(await compatibility.GetProperties(torrent.Hash));
+        Assert.Null(await compatibility.GetFiles(torrent.Hash));
+        await compatibility.SetCategory(torrent.Hash, "other");
+        await compatibility.SetTopPriority(torrent.Hash);
+        await compatibility.Delete(torrent.Hash, true);
+
+        torrentData.Verify(data => data.UpdateCategory(It.IsAny<Guid>(), It.IsAny<string?>()), Times.Never);
+        torrentData.Verify(data => data.UpdatePriority(It.IsAny<Guid>(), It.IsAny<int?>()), Times.Never);
+        torrentData.Verify(data => data.Delete(It.IsAny<Guid>()), Times.Never);
     }
 
     [Theory]
@@ -1191,10 +1263,6 @@ public class QBittorrentCompatibilityTest
             torrent.FinishedAction = finishedAction;
 
             var torrentData = CreateTorrentDataForDelete(torrent);
-            var retainedCategory = $"{category}-retained";
-            torrentData.Setup(data => data.UpdateCategory(torrent.TorrentId, retainedCategory))
-                       .Callback(() => torrent.Category = retainedCategory)
-                       .Returns(Task.CompletedTask);
             var compatibility = CreateCompatibility(torrentData: torrentData, fileSystem: fileSystem);
 
             await compatibility.Delete(torrent.Hash, true);
@@ -1231,7 +1299,7 @@ public class QBittorrentCompatibilityTest
 
         await compatibility.Delete(torrent.Hash, true);
 
-        downloads.Verify(value => value.DeleteForTorrent(torrentId), Times.Once);
+        downloads.Verify(value => value.DeleteForTorrent(It.IsAny<Guid>()), Times.Never);
         torrentData.Verify(value => value.Delete(torrentId), Times.Once);
     }
 
@@ -1282,8 +1350,15 @@ public class QBittorrentCompatibilityTest
             var torrent = CreateDeletionTorrent("Movie", "movie.mkv");
             torrent.Category = "../outside-category";
             torrent.FinishedAction = TorrentFinishedAction.RemoveAllTorrents;
+            torrent.RdId = "123";
             var torrentData = CreateTorrentDataForDelete(torrent);
-            var compatibility = CreateCompatibility(torrentData: torrentData, fileSystem: fileSystem);
+            var provider = new Mock<IAllDebridNETClient>();
+            var providerMagnets = new Mock<IMagnetApi>();
+            provider.SetupGet(client => client.Magnet).Returns(providerMagnets.Object);
+            var compatibility = CreateCompatibility(
+                torrentData: torrentData,
+                fileSystem: fileSystem,
+                allDebridClient: provider);
 
             await Assert.ThrowsAsync<InvalidDataException>(() => compatibility.Delete(torrent.Hash, true));
 
@@ -1293,6 +1368,9 @@ public class QBittorrentCompatibilityTest
                 It.IsAny<string?>(),
                 It.IsAny<DateTimeOffset?>(),
                 It.IsAny<bool>()), Times.Never);
+            providerMagnets.Verify(
+                magnets => magnets.DeleteAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+                Times.Never);
             torrentData.Verify(data => data.Delete(It.IsAny<Guid>()), Times.Never);
         }
         finally
@@ -1507,7 +1585,9 @@ public class QBittorrentCompatibilityTest
             Assert.True(fileSystem.Directory.Exists(outsideDirectory));
             Assert.True(fileSystem.Directory.Exists(categoryRoot));
             Assert.True(fileSystem.Directory.Exists(downloadRoot));
-            torrentData.Verify(value => value.UpdateCategory(torrent.TorrentId, "logpose-retained"), Times.Once);
+            torrentData.Verify(
+                value => value.FinalizeRetainedDeletion(torrent.TorrentId, true, false, false),
+                Times.Once);
             torrentData.Verify(value => value.Delete(It.IsAny<Guid>()), Times.Never);
         }
         finally
@@ -1546,7 +1626,9 @@ public class QBittorrentCompatibilityTest
 
             Assert.False(fileSystem.Directory.Exists(jobDirectory));
             Assert.True(fileSystem.Directory.Exists(siblingDirectory));
-            torrentData.Verify(value => value.UpdateCategory(torrent.TorrentId, "logpose-retained"), Times.Once);
+            torrentData.Verify(
+                value => value.FinalizeRetainedDeletion(torrent.TorrentId, true, false, false),
+                Times.Once);
             torrentData.Verify(value => value.Delete(It.IsAny<Guid>()), Times.Never);
         }
         finally
@@ -1644,9 +1726,6 @@ public class QBittorrentCompatibilityTest
             torrent.Category = "radarr";
             torrent.FinishedAction = TorrentFinishedAction.None;
             var torrentData = CreateTorrentDataForDelete(torrent);
-            torrentData.Setup(data => data.UpdateCategory(torrent.TorrentId, "radarr-retained"))
-                       .Callback(() => torrent.Category = "radarr-retained")
-                       .Returns(Task.CompletedTask);
             torrentData.Setup(data => data.Get()).ReturnsAsync([torrent]);
             var downloads = new Mock<IDownloads>();
             var compatibility = CreateCompatibility(
@@ -1659,10 +1738,13 @@ public class QBittorrentCompatibilityTest
             Assert.False(fileSystem.Directory.Exists(jobDirectory));
             Assert.True(fileSystem.Directory.Exists(categoryRoot));
             Assert.True(fileSystem.Directory.Exists(downloadRoot));
-            Assert.Equal("radarr-retained", torrent.Category);
+            Assert.Equal("radarr", torrent.Category);
+            Assert.True(torrent.QbittorrentHidden);
             Assert.Empty(await compatibility.GetTorrents("radarr"));
-            Assert.Equal(torrent.Hash, Assert.Single(await compatibility.GetTorrents("all")).Hash);
-            torrentData.Verify(data => data.UpdateCategory(torrent.TorrentId, "radarr-retained"), Times.Once);
+            Assert.Empty(await compatibility.GetTorrents("all"));
+            torrentData.Verify(
+                data => data.FinalizeRetainedDeletion(torrent.TorrentId, true, false, false),
+                Times.Once);
             torrentData.Verify(data => data.Delete(It.IsAny<Guid>()), Times.Never);
             torrentData.Verify(data => data.UpdateComplete(
                 It.IsAny<Guid>(),
@@ -1694,16 +1776,16 @@ public class QBittorrentCompatibilityTest
             torrent.Category = "radarr";
             torrent.FinishedAction = TorrentFinishedAction.None;
             var torrentData = CreateTorrentDataForDelete(torrent);
-            torrentData.Setup(data => data.UpdateCategory(torrent.TorrentId, "radarr-retained"))
-                       .Callback(() => torrent.Category = "radarr-retained")
-                       .Returns(Task.CompletedTask);
             var compatibility = CreateCompatibility(torrentData: torrentData, fileSystem: fileSystem);
 
             await compatibility.Delete(torrent.Hash, false);
 
             Assert.True(fileSystem.File.Exists(retainedFile));
-            Assert.Equal("radarr-retained", torrent.Category);
-            torrentData.Verify(data => data.UpdateCategory(torrent.TorrentId, "radarr-retained"), Times.Once);
+            Assert.Equal("radarr", torrent.Category);
+            Assert.True(torrent.QbittorrentHidden);
+            torrentData.Verify(
+                data => data.FinalizeRetainedDeletion(torrent.TorrentId, true, false, false),
+                Times.Once);
             torrentData.Verify(data => data.Delete(It.IsAny<Guid>()), Times.Never);
             torrentData.Verify(data => data.UpdateComplete(
                 It.IsAny<Guid>(),
@@ -1733,17 +1815,17 @@ public class QBittorrentCompatibilityTest
             torrent.Category = "sonarr";
             torrent.FinishedAction = TorrentFinishedAction.None;
             var torrentData = CreateTorrentDataForDelete(torrent);
-            torrentData.Setup(data => data.UpdateCategory(torrent.TorrentId, "sonarr-retained"))
-                       .Callback(() => torrent.Category = "sonarr-retained")
-                       .Returns(Task.CompletedTask);
             var compatibility = CreateCompatibility(torrentData: torrentData, fileSystem: fileSystem);
 
             await compatibility.Delete(torrent.Hash, true);
             await compatibility.Delete(torrent.Hash, true);
 
             Assert.False(fileSystem.Directory.Exists(jobDirectory));
-            Assert.Equal("sonarr-retained", torrent.Category);
-            torrentData.Verify(data => data.UpdateCategory(torrent.TorrentId, "sonarr-retained"), Times.Once);
+            Assert.Equal("sonarr", torrent.Category);
+            Assert.True(torrent.QbittorrentHidden);
+            torrentData.Verify(
+                data => data.FinalizeRetainedDeletion(torrent.TorrentId, true, false, false),
+                Times.Once);
             torrentData.Verify(data => data.Delete(It.IsAny<Guid>()), Times.Never);
         }
         finally
@@ -1784,8 +1866,8 @@ public class QBittorrentCompatibilityTest
             torrent.FinishedAction = TorrentFinishedAction.None;
             var torrentData = new Mock<ITorrentData>();
             torrentData.Setup(data => data.GetByHash(torrent.Hash)).ReturnsAsync(torrent);
-            torrentData.Setup(data => data.UpdateCategory(torrent.TorrentId, $"{category}-retained"))
-                       .Callback(() => torrent.Category = $"{category}-retained")
+            torrentData.Setup(data => data.FinalizeRetainedDeletion(torrent.TorrentId, true, false, false))
+                       .Callback(() => torrent.QbittorrentHidden = true)
                        .Returns(Task.CompletedTask);
             torrentData.Setup(data => data.GetById(torrent.TorrentId)).ReturnsAsync(torrent);
             var compatibility = CreateCompatibility(torrentData: torrentData, fileSystem: fileSystem);
@@ -1798,7 +1880,7 @@ public class QBittorrentCompatibilityTest
 
             Assert.True(fileSystem.Directory.Exists(jobDirectory));
             torrentData.Verify(
-                value => value.UpdateCategory(torrent.TorrentId, $"{category}-retained"),
+                value => value.FinalizeRetainedDeletion(torrent.TorrentId, true, false, false),
                 Times.Once);
             torrentData.Verify(value => value.Delete(It.IsAny<Guid>()), Times.Never);
         }
@@ -1852,6 +1934,7 @@ public class QBittorrentCompatibilityTest
             Hash = Guid.NewGuid().ToString("N"),
             Category = "logpose",
             RdName = rdName,
+            Completed = DateTimeOffset.UtcNow,
             Downloads =
             [
                 new()
@@ -1878,6 +1961,30 @@ public class QBittorrentCompatibilityTest
         var torrentData = new Mock<ITorrentData>();
         torrentData.Setup(data => data.GetByHash(torrent.Hash)).ReturnsAsync(torrent);
         torrentData.Setup(data => data.GetById(torrent.TorrentId)).ReturnsAsync(torrent);
+        torrentData.Setup(data => data.FinalizeRetainedDeletion(
+                       torrent.TorrentId,
+                       It.IsAny<bool>(),
+                       It.IsAny<bool>(),
+                       It.IsAny<bool>()))
+                   .Callback<Guid, bool, bool, bool>((_, hide, consume, markAsDeleted) =>
+                   {
+                       if (hide)
+                       {
+                           torrent.QbittorrentHidden = true;
+                       }
+
+                       if (consume)
+                       {
+                           torrent.FinishedAction = TorrentFinishedAction.None;
+                       }
+
+                       if (markAsDeleted)
+                       {
+                           torrent.Completed = DateTimeOffset.UtcNow;
+                           torrent.Error = "Torrent deleted";
+                       }
+                   })
+                   .Returns(Task.CompletedTask);
         return torrentData;
     }
 

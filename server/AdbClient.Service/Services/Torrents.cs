@@ -15,6 +15,7 @@ using AdbClient.Service.Services.TorrentClients;
 using AdbClient.Service.Wrappers;
 using Microsoft.Extensions.Logging;
 using MonoTorrent;
+using AllDebridException = AllDebridNET.AllDebridException;
 using Torrent = AdbClient.Data.Models.Data.Torrent;
 
 namespace AdbClient.Service.Services;
@@ -31,6 +32,7 @@ public class Torrents(
 {
     private const int DownloadCancellationAttempts = 5;
     private const int UnpackCancellationAttempts = 10;
+    private const string MissingProviderTorrentErrorCode = "MAGNET_INVALID_ID";
     private static readonly TimeSpan CancellationPollInterval = TimeSpan.FromMilliseconds(500);
 
     private static readonly SemaphoreSlim ProviderUpdateLock = new(1, 1);
@@ -374,9 +376,21 @@ public class Torrents(
         await torrentData.UpdateComplete(torrent.TorrentId, "All files excluded", DateTimeOffset.Now, false);
     }
 
-    public async Task Delete(Guid torrentId, bool deleteData, bool deleteRdTorrent, bool deleteLocalFiles)
+    public async Task Delete(
+        Guid torrentId,
+        bool deleteData,
+        bool deleteRdTorrent,
+        bool deleteLocalFiles,
+        bool hideFromQbittorrent = false)
     {
-        var torrent = await GetById(torrentId);
+        var hasDeletionEffects = deleteData || deleteRdTorrent || deleteLocalFiles;
+
+        if (!hasDeletionEffects && !hideFromQbittorrent)
+        {
+            return;
+        }
+
+        var torrent = await torrentData.GetById(torrentId);
 
         if (torrent == null)
         {
@@ -387,42 +401,40 @@ public class Torrents(
             ? GetSafeLocalDeletePath(torrent)
             : null;
 
-        Log($"Deleting", torrent);
+        Log("Deleting", torrent);
 
-        await UpdateComplete(torrentId, "Torrent deleted", DateTimeOffset.UtcNow, false);
-
-        foreach (var download in torrent.Downloads)
+        if (hasDeletionEffects)
         {
-            await CancelWhileActive(
-                () => TorrentRunner.ActiveDownloadClients.TryGetValue(download.DownloadId, out var client)
-                    ? client
-                    : null,
-                async client =>
-                {
-                    Log("Cancelling download", download, torrent);
-                    await client.Cancel();
-                },
-                DownloadCancellationAttempts);
+            foreach (var download in torrent.Downloads)
+            {
+                await CancelWhileActive(
+                    () => TorrentRunner.ActiveDownloadClients.TryGetValue(download.DownloadId, out var client)
+                        ? client
+                        : null,
+                    async client =>
+                    {
+                        Log("Cancelling download", download, torrent);
+                        await client.Cancel();
+                    },
+                    DownloadCancellationAttempts);
 
-            await CancelWhileActive(
-                () => TorrentRunner.ActiveUnpackClients.TryGetValue(download.DownloadId, out var client)
-                    ? client
-                    : null,
-                client =>
-                {
-                    Log("Cancelling unpack", download, torrent);
-                    client.Cancel();
-                    return Task.CompletedTask;
-                },
-                UnpackCancellationAttempts);
+                await CancelWhileActive(
+                    () => TorrentRunner.ActiveUnpackClients.TryGetValue(download.DownloadId, out var client)
+                        ? client
+                        : null,
+                    client =>
+                    {
+                        Log("Cancelling unpack", download, torrent);
+                        client.Cancel();
+                        return Task.CompletedTask;
+                    },
+                    UnpackCancellationAttempts);
+            }
         }
 
-        if (deleteData)
+        if (localDownloadPath != null)
         {
-            Log($"Deleting AdbClient data", torrent);
-
-            await downloads.DeleteForTorrent(torrent.TorrentId);
-            await torrentData.Delete(torrentId);
+            await DeleteLocalFiles(torrent, localDownloadPath);
         }
 
         if (deleteRdTorrent && torrent.RdId != null)
@@ -433,16 +445,30 @@ public class Torrents(
             {
                 await TorrentClient.Delete(torrent.RdId);
             }
-            catch
+            catch (AllDebridException ex) when (string.Equals(
+                       ex.ErrorCode,
+                       MissingProviderTorrentErrorCode,
+                       StringComparison.Ordinal))
             {
-                // ignored
+                logger.LogDebug(
+                    "AllDebrid torrent {ProviderTorrentId} was already absent while deleting {TorrentHash}",
+                    torrent.RdId,
+                    torrent.Hash);
             }
         }
 
-        if (localDownloadPath != null)
+        if (deleteData)
         {
-            await DeleteLocalFiles(torrent, localDownloadPath);
+            Log("Deleting AllDebrid Client data", torrent);
+            await torrentData.Delete(torrentId);
+            return;
         }
+
+        await torrentData.FinalizeRetainedDeletion(
+            torrentId,
+            hideFromQbittorrent,
+            deleteRdTorrent,
+            hasDeletionEffects && !torrent.Completed.HasValue);
     }
 
     private async Task CancelWhileActive<TClient>(

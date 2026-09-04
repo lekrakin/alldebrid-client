@@ -19,8 +19,6 @@ public sealed class QBittorrentCompatibility(
     public const int MaxTorrentFileSizeBytes = 32 * 1024 * 1024;
 
     private const long UnknownEta = 8_640_000;
-    private const string RetainedCategorySuffix = "-retained";
-
     public async Task<bool> Login(string userName, string password)
     {
         var result = await authentication.Login(userName, password);
@@ -40,6 +38,7 @@ public sealed class QBittorrentCompatibility(
         var configuredCategories = (Settings.Get.Integrations.Categories ?? string.Empty)
                                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         var assignedCategories = (await torrents.Get())
+                                .Where(torrent => !torrent.QbittorrentHidden)
                                 .Select(torrent => torrent.Category)
                                 .Where(category => !string.IsNullOrWhiteSpace(category))
                                 .Select(category => category!);
@@ -176,7 +175,7 @@ public sealed class QBittorrentCompatibility(
     public async Task<IReadOnlyList<QBittorrentTorrentInfo>> GetTorrents(string? category)
     {
         var allTorrents = await torrents.Get();
-        var filteredTorrents = allTorrents.AsEnumerable();
+        var filteredTorrents = allTorrents.Where(torrent => !torrent.QbittorrentHidden);
 
         if (!string.IsNullOrWhiteSpace(category) && !category.Equals("all", StringComparison.OrdinalIgnoreCase))
         {
@@ -191,7 +190,7 @@ public sealed class QBittorrentCompatibility(
     {
         var torrent = await torrents.GetByHash(hash);
 
-        if (torrent == null)
+        if (torrent == null || torrent.QbittorrentHidden)
         {
             return null;
         }
@@ -208,7 +207,7 @@ public sealed class QBittorrentCompatibility(
     {
         var torrent = await torrents.GetByHash(hash);
 
-        if (torrent == null)
+        if (torrent == null || torrent.QbittorrentHidden)
         {
             return null;
         }
@@ -240,7 +239,7 @@ public sealed class QBittorrentCompatibility(
         {
             var torrent = await torrents.GetByHash(hash);
 
-            if (torrent == null)
+            if (torrent == null || torrent.QbittorrentHidden)
             {
                 continue;
             }
@@ -258,6 +257,13 @@ public sealed class QBittorrentCompatibility(
     {
         foreach (var hash in SplitHashes(hashes))
         {
+            var torrent = await torrents.GetByHash(hash);
+
+            if (torrent == null || torrent.QbittorrentHidden)
+            {
+                continue;
+            }
+
             await torrents.UpdatePriority(hash, 1);
         }
     }
@@ -268,7 +274,7 @@ public sealed class QBittorrentCompatibility(
         {
             var torrent = await torrents.GetByHash(hash);
 
-            if (torrent == null)
+            if (torrent == null || torrent.QbittorrentHidden)
             {
                 continue;
             }
@@ -283,19 +289,13 @@ public sealed class QBittorrentCompatibility(
                     await torrents.Delete(torrent.TorrentId, true, true, deleteFiles);
                     break;
                 case TorrentFinishedAction.RemoveProvider:
-                    await torrents.Delete(torrent.TorrentId, false, true, deleteFiles);
-                    await MoveToRetainedCategory(torrent, hash);
+                    await torrents.Delete(torrent.TorrentId, false, true, deleteFiles, true);
                     break;
                 case TorrentFinishedAction.RemoveClient:
                     await torrents.Delete(torrent.TorrentId, true, false, deleteFiles);
                     break;
                 case TorrentFinishedAction.None:
-                    if (deleteFiles)
-                    {
-                        await torrents.DeleteLocalFiles(torrent);
-                    }
-
-                    await MoveToRetainedCategory(torrent, hash);
+                    await torrents.Delete(torrent.TorrentId, false, false, deleteFiles, true);
 
                     logger.LogDebug(
                         "Retaining qBittorrent record {TorrentHash} under its configured finished action",
@@ -352,19 +352,6 @@ public sealed class QBittorrentCompatibility(
         }
 
         return normalized;
-    }
-
-    private async Task MoveToRetainedCategory(Torrent torrent, string hash)
-    {
-        if (string.IsNullOrWhiteSpace(torrent.Category) ||
-            torrent.Category.EndsWith(RetainedCategorySuffix, StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        var retainedCategory = torrent.Category + RetainedCategorySuffix;
-        await torrents.UpdateCategory(hash, retainedCategory);
-        torrent.Category = retainedCategory;
     }
 
     private EmptyDirectoryCleanupPlan? CreateEmptyDirectoryCleanupPlan(Torrent torrent)

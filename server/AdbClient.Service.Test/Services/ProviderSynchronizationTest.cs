@@ -36,7 +36,7 @@ public class ProviderSynchronizationTest
             new DbSettingsProvider { AutoDelete = true });
 
         Assert.True(fileSystem.File.Exists(localFile));
-        downloads.Verify(data => data.DeleteForTorrent(torrent.TorrentId), Times.Once);
+        downloads.Verify(data => data.DeleteForTorrent(It.IsAny<Guid>()), Times.Never);
         torrentData.Verify(data => data.Delete(torrent.TorrentId), Times.Once);
     }
 

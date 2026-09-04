@@ -1,4 +1,4 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -21,10 +21,13 @@ public class Torrent
 
     [JsonIgnore]
     public string? ClientReportedDownloadPath { get; set; }
-        
+
+    [JsonIgnore]
+    public bool QbittorrentHidden { get; set; }
+
     public TorrentDownloadAction DownloadAction { get; set; }
     public TorrentFinishedAction FinishedAction { get; set; }
-    public int  FinishedActionDelay { get; set; }
+    public int FinishedActionDelay { get; set; }
     public TorrentHostDownloadAction HostDownloadAction { get; set; }
     public int DownloadMinSize { get; set; }
     public string? IncludeRegex { get; set; }

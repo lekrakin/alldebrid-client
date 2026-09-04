@@ -53,6 +53,107 @@ public class TorrentDataTest
         Assert.Equal(originalLocalPath, stored.ClientReportedDownloadPath);
     }
 
+    [Fact]
+    public async Task FinalizeRetainedDeletion_ConsumesProviderActionWithoutChangingCompletedOutcome()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<DataContext>()
+                     .UseSqlite(connection)
+                     .Options;
+        await using var dataContext = new DataContext(options);
+        await dataContext.Database.EnsureCreatedAsync();
+        var completed = DateTimeOffset.UtcNow.AddMinutes(-1);
+        var torrent = new Torrent
+        {
+            TorrentId = Guid.NewGuid(),
+            Hash = Guid.NewGuid().ToString("N"),
+            Completed = completed,
+            FinishedAction = TorrentFinishedAction.RemoveProvider
+        };
+        dataContext.Torrents.Add(torrent);
+        await dataContext.SaveChangesAsync();
+        var torrentData = new TorrentData(dataContext);
+
+        await torrentData.FinalizeRetainedDeletion(torrent.TorrentId, true, true, false);
+
+        var stored = await dataContext.Torrents.AsNoTracking().SingleAsync();
+        Assert.True(stored.QbittorrentHidden);
+        Assert.Equal(TorrentFinishedAction.None, stored.FinishedAction);
+        Assert.Equal(completed, stored.Completed);
+        Assert.Null(stored.Error);
+    }
+
+    [Fact]
+    public async Task Delete_RemovesTorrentAndDownloadsTogether()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<DataContext>()
+                     .UseSqlite(connection)
+                     .Options;
+        await using var dataContext = new DataContext(options);
+        await dataContext.Database.EnsureCreatedAsync();
+        var torrent = CreateTorrentWithDownload();
+        dataContext.Torrents.Add(torrent);
+        await dataContext.SaveChangesAsync();
+        var torrentData = new TorrentData(dataContext);
+
+        await torrentData.Delete(torrent.TorrentId);
+
+        Assert.Empty(await dataContext.Torrents.AsNoTracking().ToListAsync());
+        Assert.Empty(await dataContext.Downloads.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
+    public async Task Delete_WhenParentDeleteFails_RollsBackDownloadDeletion()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<DataContext>()
+                     .UseSqlite(connection)
+                     .Options;
+        await using var dataContext = new DataContext(options);
+        await dataContext.Database.EnsureCreatedAsync();
+        var torrent = CreateTorrentWithDownload();
+        dataContext.Torrents.Add(torrent);
+        await dataContext.SaveChangesAsync();
+        await dataContext.Database.ExecuteSqlRawAsync(
+            """
+            CREATE TRIGGER RejectTorrentDelete
+            BEFORE DELETE ON Torrents
+            BEGIN
+                SELECT RAISE(ABORT, 'delete rejected');
+            END;
+            """);
+        var torrentData = new TorrentData(dataContext);
+
+        await Assert.ThrowsAsync<DbUpdateException>(() => torrentData.Delete(torrent.TorrentId));
+
+        dataContext.ChangeTracker.Clear();
+        Assert.Single(await dataContext.Torrents.AsNoTracking().ToListAsync());
+        Assert.Single(await dataContext.Downloads.AsNoTracking().ToListAsync());
+    }
+
+    private static Torrent CreateTorrentWithDownload()
+    {
+        var torrentId = Guid.NewGuid();
+        return new()
+        {
+            TorrentId = torrentId,
+            Hash = Guid.NewGuid().ToString("N"),
+            Downloads =
+            [
+                new()
+                {
+                    DownloadId = Guid.NewGuid(),
+                    TorrentId = torrentId,
+                    Path = "payload.mkv"
+                }
+            ]
+        };
+    }
+
     private static async Task<Torrent> AddTorrent(
         string currentLocalPath,
         string? currentReportedPath,

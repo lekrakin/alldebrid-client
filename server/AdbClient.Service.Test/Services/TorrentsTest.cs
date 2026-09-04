@@ -398,9 +398,21 @@ public class TorrentsTest
             return Task.CompletedTask;
         });
 
-        await service.Delete(torrent.TorrentId, false, false, false);
+        await service.Delete(torrent.TorrentId, true, false, false);
 
         Assert.Equal(0, delayCalls);
+    }
+
+    [Fact]
+    public async Task Delete_WhenNoEffectIsRequested_DoesNotLoadOrMutateTorrent()
+    {
+        var mocks = new Mocks();
+        var service = CreateService(mocks, _ => Task.CompletedTask);
+
+        await service.Delete(Guid.NewGuid(), false, false, false);
+
+        mocks.TorrentDataMock.VerifyNoOtherCalls();
+        mocks.DownloadsMock.VerifyNoOtherCalls();
     }
 
     [Theory]
@@ -429,7 +441,7 @@ public class TorrentsTest
                 TorrentRunner.ActiveDownloadClients[download.DownloadId] = new DownloadClient(download, torrent, "unused");
             }
 
-            await service.Delete(torrent.TorrentId, false, false, false);
+            await service.Delete(torrent.TorrentId, true, false, false);
 
             Assert.Equal(expectedAttempts, delayCalls);
         }
@@ -461,7 +473,7 @@ public class TorrentsTest
         {
             TorrentRunner.ActiveDownloadClients[download.DownloadId] = new DownloadClient(download, torrent, "unused");
 
-            await service.Delete(torrent.TorrentId, false, false, false);
+            await service.Delete(torrent.TorrentId, true, false, false);
 
             Assert.Equal(2, delayCalls);
         }

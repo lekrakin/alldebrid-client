@@ -1,6 +1,6 @@
-using Microsoft.EntityFrameworkCore;
 using AdbClient.Data.Enums;
 using AdbClient.Data.Models.Data;
+using Microsoft.EntityFrameworkCore;
 
 namespace AdbClient.Data.Data;
 
@@ -202,11 +202,39 @@ public class TorrentData(DataContext dataContext) : ITorrentData
     public Task UpdateError(Guid torrentId, string error) =>
         Patch(torrentId, db => db.Error = error);
 
+    public Task FinalizeRetainedDeletion(
+        Guid torrentId,
+        bool hideFromQbittorrent,
+        bool consumeFinishedAction,
+        bool markAsDeleted) =>
+        Patch(torrentId, db =>
+        {
+            if (hideFromQbittorrent)
+            {
+                db.QbittorrentHidden = true;
+            }
+
+            if (consumeFinishedAction)
+            {
+                db.FinishedAction = TorrentFinishedAction.None;
+            }
+
+            if (markAsDeleted)
+            {
+                db.Completed = DateTimeOffset.UtcNow;
+                db.Error = "Torrent deleted";
+                db.Retry = null;
+            }
+        });
+
     public async Task Delete(Guid torrentId)
     {
-        var dbTorrent = await dataContext.Torrents.FirstOrDefaultAsync(m => m.TorrentId == torrentId);
+        var dbTorrent = await dataContext.Torrents
+                                         .Include(torrent => torrent.Downloads)
+                                         .FirstOrDefaultAsync(torrent => torrent.TorrentId == torrentId);
         if (dbTorrent == null) return;
 
+        dataContext.Downloads.RemoveRange(dbTorrent.Downloads);
         dataContext.Torrents.Remove(dbTorrent);
         await dataContext.SaveChangesAsync();
         await VoidCache();
