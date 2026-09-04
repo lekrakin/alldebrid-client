@@ -6,7 +6,6 @@
     "start": "ng serve",
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
-    "update": "ng update --force --allow-dirty @angular/cli @angular/core @angular/cdk",
     "lint": "ng lint",
     "prettier": "prettier --write \"./**/*.{ts,html,json}\"",
     "format": "npm run prettier",
