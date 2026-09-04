@@ -199,7 +199,7 @@ public sealed class QBittorrentCompatibility(
         return new()
         {
             Hash = torrent.Hash,
-            SavePath = GetSavePath(torrent.Category),
+            SavePath = GetTorrentSavePath(torrent),
             SeedingTime = 0
         };
     }
@@ -369,7 +369,8 @@ public sealed class QBittorrentCompatibility(
 
     private EmptyDirectoryCleanupPlan? CreateEmptyDirectoryCleanupPlan(Torrent torrent)
     {
-        if (string.IsNullOrWhiteSpace(Settings.Get.Storage.DownloadPath) ||
+        if ((string.IsNullOrWhiteSpace(torrent.LocalDownloadPath) &&
+             string.IsNullOrWhiteSpace(Settings.Get.Storage.DownloadPath)) ||
             string.IsNullOrWhiteSpace(torrent.RdName))
         {
             return null;
@@ -377,7 +378,10 @@ public sealed class QBittorrentCompatibility(
 
         try
         {
-            var downloadRoot = FileSystemPath.Normalize(Settings.Get.Storage.DownloadPath);
+            var downloadRoot = FileSystemPath.Normalize(
+                string.IsNullOrWhiteSpace(torrent.LocalDownloadPath)
+                    ? Settings.Get.Storage.DownloadPath
+                    : torrent.LocalDownloadPath);
             var categoryRoot = string.IsNullOrWhiteSpace(torrent.Category)
                 ? downloadRoot
                 : FileSystemPath.Normalize(fileSystem.Path.Combine(downloadRoot, torrent.Category));
@@ -561,7 +565,7 @@ public sealed class QBittorrentCompatibility(
         var downloadSpeed = torrent.Downloads.Count > 0 ? localSpeed : Math.Max(0, torrent.RdSpeed ?? 0);
         var activeDownloadSize = torrent.Downloads.Sum(download => Math.Max(0, download.BytesTotal));
         var size = Math.Max(0, torrent.RdSize ?? activeDownloadSize);
-        var savePath = GetSavePath(torrent.Category);
+        var savePath = GetTorrentSavePath(torrent);
 
         return new()
         {
@@ -632,6 +636,24 @@ public sealed class QBittorrentCompatibility(
             : Settings.Get.Integrations.ReportedDownloadPath;
 
         return CombineMappedPath(mappedPath, category);
+    }
+
+    private static string GetTorrentSavePath(Torrent torrent)
+    {
+        var settings = Settings.Get;
+        var usesCurrentLocalPath = string.IsNullOrWhiteSpace(torrent.LocalDownloadPath) ||
+                                   FileSystemPath.PathsEqual(
+                                       torrent.LocalDownloadPath,
+                                       settings.Storage.DownloadPath);
+        var mappedPath = usesCurrentLocalPath
+            ? string.IsNullOrWhiteSpace(settings.Integrations.ReportedDownloadPath)
+                ? settings.Storage.DownloadPath
+                : settings.Integrations.ReportedDownloadPath
+            : string.IsNullOrWhiteSpace(torrent.ClientReportedDownloadPath)
+                ? torrent.LocalDownloadPath!
+                : torrent.ClientReportedDownloadPath;
+
+        return CombineMappedPath(mappedPath, torrent.Category);
     }
 
     private static string GetContentPath(Torrent torrent, string savePath)

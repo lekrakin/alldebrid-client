@@ -443,6 +443,24 @@ public class TorrentsTest
         }
     }
 
+    [Fact]
+    public void DownloadPath_UsesRootCapturedByTorrent()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "adb-original-download-root");
+        var torrent = new Torrent
+        {
+            TorrentId = Guid.NewGuid(),
+            Hash = Guid.NewGuid().ToString("N"),
+            Category = "radarr",
+            LocalDownloadPath = root
+        };
+        var service = CreateService(new Mocks(), _ => Task.CompletedTask);
+
+        var result = service.DownloadPath(torrent);
+
+        Assert.Equal(Path.Combine(root, "radarr"), result);
+    }
+
     private static (Torrent Torrent, Download Download, Mocks Mocks) CreateTorrentForCancellationTest()
     {
         var torrent = new Torrent

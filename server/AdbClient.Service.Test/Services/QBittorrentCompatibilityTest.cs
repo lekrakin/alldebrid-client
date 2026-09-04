@@ -89,6 +89,88 @@ public class QBittorrentCompatibilityTest
     }
 
     [Fact]
+    public async Task TorrentPaths_RemainBoundToThePathsCapturedWhenAdded()
+    {
+        var originalMappedPath = Settings.Get.Integrations.ReportedDownloadPath;
+        var originalDownloadPath = Settings.Get.Storage.DownloadPath;
+
+        try
+        {
+            Settings.Get.Integrations.ReportedDownloadPath = "/downloads/new";
+            Settings.Get.Storage.DownloadPath = "/storage/new";
+
+            var torrent = new Torrent
+            {
+                TorrentId = Guid.NewGuid(),
+                Hash = "0123456789abcdef0123456789abcdef01234567",
+                Category = "radarr",
+                RdName = "Movie.Release",
+                LocalDownloadPath = "/storage/original",
+                ClientReportedDownloadPath = "/downloads/original",
+                Downloads =
+                [
+                    new()
+                    {
+                        FileName = "movie.mkv",
+                        Link = "https://example.test/movie.mkv",
+                        Completed = DateTimeOffset.UtcNow
+                    }
+                ]
+            };
+            var torrentData = new Mock<ITorrentData>();
+            torrentData.Setup(data => data.Get()).ReturnsAsync([torrent]);
+            torrentData.Setup(data => data.GetByHash(torrent.Hash)).ReturnsAsync(torrent);
+            var compatibility = CreateCompatibility(torrentData: torrentData);
+
+            var info = Assert.Single(await compatibility.GetTorrents("radarr"));
+            var properties = await compatibility.GetProperties(torrent.Hash);
+
+            Assert.Equal("/downloads/original/radarr", info.SavePath);
+            Assert.Equal("/downloads/original/radarr/Movie.Release/movie.mkv", info.ContentPath);
+            Assert.Equal("/downloads/original/radarr", properties?.SavePath);
+        }
+        finally
+        {
+            Settings.Get.Integrations.ReportedDownloadPath = originalMappedPath;
+            Settings.Get.Storage.DownloadPath = originalDownloadPath;
+        }
+    }
+
+    [Fact]
+    public async Task TorrentPaths_UseUpdatedReportedPathWhenPhysicalRootIsUnchanged()
+    {
+        var originalMappedPath = Settings.Get.Integrations.ReportedDownloadPath;
+        var originalDownloadPath = Settings.Get.Storage.DownloadPath;
+
+        try
+        {
+            Settings.Get.Integrations.ReportedDownloadPath = "/downloads/new";
+            Settings.Get.Storage.DownloadPath = "/storage/shared";
+            var torrent = new Torrent
+            {
+                TorrentId = Guid.NewGuid(),
+                Hash = "0123456789abcdef0123456789abcdef01234567",
+                Category = "sonarr",
+                RdName = "Episode",
+                LocalDownloadPath = "/storage/shared",
+                ClientReportedDownloadPath = "/downloads/old"
+            };
+            var torrentData = new Mock<ITorrentData>();
+            torrentData.Setup(data => data.Get()).ReturnsAsync([torrent]);
+            var compatibility = CreateCompatibility(torrentData: torrentData);
+
+            var info = Assert.Single(await compatibility.GetTorrents("sonarr"));
+
+            Assert.Equal("/downloads/new/sonarr", info.SavePath);
+        }
+        finally
+        {
+            Settings.Get.Integrations.ReportedDownloadPath = originalMappedPath;
+            Settings.Get.Storage.DownloadPath = originalDownloadPath;
+        }
+    }
+
+    [Fact]
     public async Task GetTorrents_ReportsCompletionOnlyAfterHostDownloadCompletes()
     {
         var torrent = new Torrent
@@ -1289,6 +1371,40 @@ public class QBittorrentCompatibilityTest
             Assert.False(fileSystem.Directory.Exists(jobDirectory));
             Assert.True(fileSystem.Directory.Exists(categoryRoot));
             Assert.True(fileSystem.Directory.Exists(downloadRoot));
+        }
+        finally
+        {
+            Settings.Get.Storage.DownloadPath = originalDownloadPath;
+        }
+    }
+
+    [Fact]
+    public async Task DeleteWithoutFiles_CleansCapturedRootAfterGlobalPathChanges()
+    {
+        const string jobName = "Imported Movie";
+        var originalDownloadPath = Settings.Get.Storage.DownloadPath;
+        var capturedRoot = GetTestDownloadRoot();
+        var currentRoot = Path.Combine(capturedRoot, "new-root");
+        var capturedCategoryRoot = Path.Combine(capturedRoot, "radarr");
+        var capturedJobRoot = Path.Combine(capturedCategoryRoot, jobName);
+        var fileSystem = new MockFileSystem();
+        fileSystem.AddDirectory(capturedJobRoot);
+        fileSystem.AddDirectory(currentRoot);
+
+        try
+        {
+            Settings.Get.Storage.DownloadPath = currentRoot;
+            var torrent = CreateDeletionTorrent(jobName, "movie.mkv");
+            torrent.Category = "radarr";
+            torrent.LocalDownloadPath = capturedRoot;
+            var torrentData = CreateTorrentDataForDelete(torrent);
+            var compatibility = CreateCompatibility(torrentData: torrentData, fileSystem: fileSystem);
+
+            await compatibility.Delete(torrent.Hash, false);
+
+            Assert.False(fileSystem.Directory.Exists(capturedJobRoot));
+            Assert.True(fileSystem.Directory.Exists(capturedCategoryRoot));
+            Assert.True(fileSystem.Directory.Exists(currentRoot));
         }
         finally
         {

@@ -78,13 +78,6 @@ public class TorrentRunner(ILogger<TorrentRunner> logger, Torrents torrents, Dow
             settingUnpackLimit = 0;
         }
 
-        var settingDownloadPath = Settings.Get.Storage.DownloadPath;
-        if (string.IsNullOrWhiteSpace(settingDownloadPath))
-        {
-            logger.LogError("No DownloadPath set in settings");
-            return;
-        }
-
         var sw = new Stopwatch();
         sw.Start();
 
@@ -404,7 +397,7 @@ public class TorrentRunner(ILogger<TorrentRunner> logger, Torrents torrents, Dow
                         return;
                     }
 
-                    var downloadPath = DownloadHelper.GetCategoryPath(settingDownloadPath, torrent.Category);
+                    var downloadPath = torrents.DownloadPath(torrent);
 
                     Log($"Marking download as started", download, torrent);
 
@@ -497,7 +490,7 @@ public class TorrentRunner(ILogger<TorrentRunner> logger, Torrents torrents, Dow
                         continue;
                     }
 
-                    var downloadPath = DownloadHelper.GetCategoryPath(settingDownloadPath, torrent.Category);
+                    var downloadPath = torrents.DownloadPath(torrent);
 
                     download.UnpackingStarted = DateTimeOffset.UtcNow;
                     await downloads.UpdateUnpackingStarted(download.DownloadId, download.UnpackingStarted);

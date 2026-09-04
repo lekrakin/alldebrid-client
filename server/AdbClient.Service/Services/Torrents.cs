@@ -785,17 +785,24 @@ public class Torrents(
         return torrent;
     }
 
-    private string DownloadPath(Torrent torrent, DbSettings? settings = null)
+    internal string DownloadPath(Torrent torrent, DbSettings? settings = null)
     {
+        var downloadRoot = string.IsNullOrWhiteSpace(torrent.LocalDownloadPath)
+            ? (settings ?? Settings.Get).Storage.DownloadPath
+            : torrent.LocalDownloadPath;
+
         return DownloadHelper.GetCategoryPath(
-            (settings ?? Settings.Get).Storage.DownloadPath,
+            downloadRoot,
             torrent.Category,
             fileSystem);
     }
 
     private string GetSafeLocalDeletePath(Torrent torrent)
     {
-        var downloadRoot = FileSystemPath.Normalize(Settings.Get.Storage.DownloadPath);
+        var downloadRoot = FileSystemPath.Normalize(
+            string.IsNullOrWhiteSpace(torrent.LocalDownloadPath)
+                ? Settings.Get.Storage.DownloadPath
+                : torrent.LocalDownloadPath);
         var categoryPath = DownloadPath(torrent);
         var torrentPath = FileSystemPath.Normalize(Path.Combine(
             categoryPath,

@@ -1,6 +1,7 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using AdbClient.Data.Enums;
 using AdbClient.Data.Models.TorrentClient;
 
@@ -14,6 +15,12 @@ public class Torrent
     public string Hash { get; set; } = null!;
 
     public string? Category { get; set; }
+
+    [JsonIgnore]
+    public string? LocalDownloadPath { get; set; }
+
+    [JsonIgnore]
+    public string? ClientReportedDownloadPath { get; set; }
         
     public TorrentDownloadAction DownloadAction { get; set; }
     public TorrentFinishedAction FinishedAction { get; set; }

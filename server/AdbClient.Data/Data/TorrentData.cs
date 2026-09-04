@@ -72,6 +72,19 @@ public class TorrentData(DataContext dataContext) : ITorrentData
                                    DownloadClient downloadClient,
                                    Torrent torrent)
     {
+        var settings = SettingData.Get;
+        var hasCapturedLocalPath = !string.IsNullOrWhiteSpace(torrent.LocalDownloadPath);
+        var localDownloadPath = hasCapturedLocalPath
+            ? torrent.LocalDownloadPath
+            : settings.Storage.DownloadPath;
+        var clientReportedDownloadPath = !string.IsNullOrWhiteSpace(torrent.ClientReportedDownloadPath)
+            ? torrent.ClientReportedDownloadPath
+            : hasCapturedLocalPath
+                ? localDownloadPath
+                : string.IsNullOrWhiteSpace(settings.Integrations.ReportedDownloadPath)
+                    ? localDownloadPath
+                    : settings.Integrations.ReportedDownloadPath;
+
         var newTorrent = new Torrent
         {
             TorrentId = Guid.NewGuid(),
@@ -79,6 +92,8 @@ public class TorrentData(DataContext dataContext) : ITorrentData
             RdId = rdId,
             Hash = hash.ToLower(),
             Category = torrent.Category,
+            LocalDownloadPath = localDownloadPath,
+            ClientReportedDownloadPath = clientReportedDownloadPath,
             HostDownloadAction = torrent.HostDownloadAction,
             FinishedActionDelay = torrent.FinishedActionDelay,
             DownloadAction = torrent.DownloadAction,
