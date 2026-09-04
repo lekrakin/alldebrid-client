@@ -76,8 +76,7 @@ export class AddNewTorrentComponent implements OnInit {
         ?.value as number;
       this.downloadRetryAttempts = settings.find((m) => m.key === 'Downloads:Defaults:DownloadRetryAttempts')
         ?.value as number;
-      this.torrentDeleteOnError = settings.find((m) => m.key === 'Downloads:Defaults:DeleteOnError')
-        ?.value as number;
+      this.torrentDeleteOnError = settings.find((m) => m.key === 'Downloads:Defaults:DeleteOnError')?.value as number;
       this.torrentLifetime = settings.find((m) => m.key === 'Downloads:Defaults:TorrentLifetime')?.value as number;
       this.priority = settings.find((m) => m.key === 'Downloads:Defaults:Priority')?.value as number;
     });

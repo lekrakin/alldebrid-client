@@ -1,231 +1,350 @@
-<div class="tabs">
-  <ul>
-    @for (tab of tabs; track tab.key; let i = $index) {
-      <li [ngClass]="{ 'is-active': activeTab === i }" (click)="activeTab = i">
-        <a>{{ tab.displayName }}</a>
-      </li>
-    }
-    <li [ngClass]="{ 'is-active': activeTab === 99 }" (click)="activeTab = 99">
-      <a>Speed Tests</a>
-    </li>
-    <li [ngClass]="{ 'is-active': activeTab === 100 }" (click)="activeTab = 100">
-      <a>Profile</a>
-    </li>
-  </ul>
-</div>
+<header class="settings-heading">
+  <h1 class="title is-4">Settings</h1>
+  <p class="subtitle is-6">Configure downloads, storage, integrations, and application access.</p>
+</header>
 
-@for (tab of tabs; track tab.key; let i = $index) {
-  <div [hidden]="activeTab !== i">
-    @if (tab.description) {
-      <p class="has-text-grey mb-3">{{ tab.description }}</p>
-    }
-    <div class="settings-grid" [class.settings-grid--two-col]="tab.key === 'General' || tab.key === 'Paths'">
-      @for (setting of tab.settings; track setting.key) {
-        @if (setting.type === 'Object') {
-          <h3 class="settings-section">{{ setting.displayName }}</h3>
-        } @else {
-          <div class="field" [class.field-compact]="setting.type === 'Int32' || setting.type === 'Boolean'">
-            @if (setting.type !== 'Boolean') {
-              <label class="label">{{ setting.displayName }}</label>
-            }
-            @switch (setting.type) {
-              @case ('String') {
-                <div class="control">
-                  <input
-                    class="input"
-                    type="text"
-                    [(ngModel)]="setting.value"
-                    [placeholder]="getPlaceholder(setting)"
-                  />
-                </div>
-              }
-              @case ('Int32') {
-                <div class="control">
-                  <input class="input" type="number" [(ngModel)]="setting.value" />
-                </div>
-              }
-              @case ('Boolean') {
-                <label class="checkbox">
-                  <input type="checkbox" [(ngModel)]="setting.value" />
-                  {{ setting.displayName }}
-                </label>
-              }
-              @case ('Enum') {
-                <div class="control select is-fullwidth">
-                  <select [(ngModel)]="setting.value">
-                    @for (kvp of setting.enumValues | keyvalue; track kvp) {
-                      <option [value]="kvp.key">{{ kvp.value }}</option>
+@if (loading) {
+  <div class="loading-state" role="status" aria-live="polite">
+    <progress class="progress is-small is-primary" max="100">Loading settings</progress>
+    <p>Loading settings…</p>
+  </div>
+} @else if (loadError) {
+  <div class="notification is-danger is-light" role="alert">
+    <p>{{ loadError }}</p>
+    <button class="button is-danger is-light mt-3" type="button" (click)="loadSettings()">Try again</button>
+  </div>
+} @else {
+  <nav class="tabs settings-tabs" aria-label="Settings sections">
+    <ul>
+      @for (tab of tabs; track tab.key) {
+        <li [ngClass]="{ 'is-active': activeView === tab.key }">
+          <button
+            class="settings-tab"
+            type="button"
+            [id]="'settings-tab-' + tab.key"
+            [attr.aria-controls]="'settings-panel-' + tab.key"
+            [attr.aria-current]="activeView === tab.key ? 'page' : null"
+            (click)="selectView(tab.key)"
+          >
+            {{ tab.displayName }}
+          </button>
+        </li>
+      }
+      <li [ngClass]="{ 'is-active': activeView === diagnosticsView }">
+        <button
+          class="settings-tab"
+          type="button"
+          id="settings-tab-diagnostics"
+          aria-controls="settings-panel-diagnostics"
+          [attr.aria-current]="activeView === diagnosticsView ? 'page' : null"
+          (click)="selectView(diagnosticsView)"
+        >
+          Diagnostics
+        </button>
+      </li>
+      <li [ngClass]="{ 'is-active': activeView === accountView }">
+        <button
+          class="settings-tab"
+          type="button"
+          id="settings-tab-account"
+          aria-controls="settings-panel-account"
+          [attr.aria-current]="activeView === accountView ? 'page' : null"
+          (click)="selectView(accountView)"
+        >
+          Account
+        </button>
+      </li>
+    </ul>
+  </nav>
+
+  @for (tab of tabs; track tab.key) {
+    @if (activeView === tab.key) {
+      <section [id]="'settings-panel-' + tab.key" [attr.aria-labelledby]="'settings-tab-' + tab.key">
+        @if (tab.description) {
+          <p class="has-text-grey mb-5">{{ tab.description }}</p>
+        }
+
+        <div class="settings-grid">
+          @for (setting of tab.settings; track setting.key) {
+            @if (setting.type === 'Object') {
+              <div class="settings-section">
+                <h2 class="title is-6 mb-1">{{ setting.displayName }}</h2>
+                @if (setting.description) {
+                  <p class="help mt-0" [innerHtml]="setting.description | nl2br"></p>
+                }
+              </div>
+            } @else {
+              <div class="field" [class.field-wide]="setting.type === 'String'">
+                @if (setting.type !== 'Boolean') {
+                  <label class="label" [for]="'setting-' + setting.key">{{ setting.displayName }}</label>
+                }
+
+                @switch (setting.type) {
+                  @case ('String') {
+                    @if (setting.isSecret) {
+                      <div class="field has-addons">
+                        <div class="control is-expanded">
+                          <input
+                            class="input"
+                            [id]="'setting-' + setting.key"
+                            [type]="isSecretVisible(setting) ? 'text' : 'password'"
+                            [(ngModel)]="setting.value"
+                            [placeholder]="getPlaceholder(setting)"
+                            autocomplete="off"
+                            spellcheck="false"
+                          />
+                        </div>
+                        <div class="control">
+                          <button
+                            class="button"
+                            type="button"
+                            [attr.aria-label]="
+                              isSecretVisible(setting) ? 'Hide ' + setting.displayName : 'Show ' + setting.displayName
+                            "
+                            [attr.aria-pressed]="isSecretVisible(setting)"
+                            (click)="toggleSecretVisibility(setting)"
+                          >
+                            <span class="icon" aria-hidden="true">
+                              <i [class]="isSecretVisible(setting) ? 'fas fa-eye-slash' : 'fas fa-eye'"></i>
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+                    } @else {
+                      <div class="control">
+                        <input
+                          class="input"
+                          [id]="'setting-' + setting.key"
+                          type="text"
+                          [(ngModel)]="setting.value"
+                          [placeholder]="getPlaceholder(setting)"
+                          spellcheck="false"
+                        />
+                      </div>
                     }
-                  </select>
-                </div>
-              }
-              @default {
-                <div class="control">Invalid setting type {{ setting.type }}</div>
-              }
+                  }
+                  @case ('Int32') {
+                    <div class="control">
+                      <input
+                        class="input"
+                        [id]="'setting-' + setting.key"
+                        type="number"
+                        step="1"
+                        [attr.min]="setting.minimum"
+                        [attr.max]="setting.maximum"
+                        [(ngModel)]="setting.value"
+                      />
+                    </div>
+                  }
+                  @case ('Boolean') {
+                    <label class="checkbox" [for]="'setting-' + setting.key">
+                      <input [id]="'setting-' + setting.key" type="checkbox" [(ngModel)]="setting.value" />
+                      {{ setting.displayName }}
+                    </label>
+                  }
+                  @case ('Enum') {
+                    <div class="control select is-fullwidth">
+                      <select [id]="'setting-' + setting.key" [(ngModel)]="setting.value">
+                        @for (option of setting.enumValues | keyvalue; track option.key) {
+                          <option [value]="option.key">{{ option.value }}</option>
+                        }
+                      </select>
+                    </div>
+                  }
+                  @default {
+                    <div class="notification is-warning is-light" role="alert">
+                      Unsupported setting type: {{ setting.type }}
+                    </div>
+                  }
+                }
+
+                @if (setting.description) {
+                  <p class="help" [innerHtml]="setting.description | nl2br"></p>
+                }
+              </div>
             }
-            @if (setting.description) {
-              <p class="help" [innerHtml]="setting.description | nl2br"></p>
+          }
+        </div>
+
+        @if (tab.key === 'General') {
+          <div class="field field-wide">
+            <label class="label">Magnet link handler</label>
+            <div class="control">
+              <button
+                class="button is-info"
+                type="button"
+                (click)="registerMagnetHandler()"
+                [disabled]="!canRegisterMagnetHandler"
+              >
+                {{ canRegisterMagnetHandler ? 'Register handler' : 'Unavailable in this browser' }}
+              </button>
+            </div>
+            <p class="help">
+              @if (canRegisterMagnetHandler) {
+                Ask the browser to open magnet links in AllDebrid Client.
+              } @else {
+                This browser does not support protocol registration here, or the client is not using a secure context.
+              }
+            </p>
+            @if (magnetHandlerError) {
+              <div class="notification is-danger is-light mt-3" role="alert">{{ magnetHandlerError }}</div>
+            }
+            @if (magnetHandlerSuccess) {
+              <div class="notification is-success is-light mt-3" role="status">
+                Registration requested. Confirm the browser prompt to finish.
+              </div>
             }
           </div>
         }
-      }
-    </div>
-  </div>
-}
 
-@if (activeTab === 99) {
-  <div class="settings-grid">
-    <div class="field">
-      <label class="label">Test download path permissions</label>
-      <div class="control">
-        @if (!testPathError && !testPathSuccess) {
+        @if (settingsSaveError) {
+          <div class="notification is-danger is-light" role="alert">{{ settingsSaveError }}</div>
+        }
+        @if (settingsSaveSuccess) {
+          <div class="notification is-success is-light" role="status">Settings saved and reloaded.</div>
+        }
+
+        <div class="settings-actions">
+          <button
+            class="button is-success"
+            type="button"
+            (click)="saveSettings()"
+            [disabled]="settingsSaving"
+            [ngClass]="{ 'is-loading': settingsSaving }"
+          >
+            Save settings
+          </button>
+        </div>
+      </section>
+    }
+  }
+
+  @if (activeView === diagnosticsView) {
+    <section id="settings-panel-diagnostics" aria-labelledby="settings-tab-diagnostics">
+      <h2 class="title is-5 mb-2">Diagnostics</h2>
+      <p class="has-text-grey mb-5">Run focused checks without changing application settings.</p>
+
+      <div class="diagnostics-grid">
+        <article class="box diagnostic-card">
+          <h3 class="title is-6">Download path</h3>
+          <p class="help mb-4">Checks whether the local path currently shown under Storage is writable.</p>
           <button
             class="button is-warning"
+            type="button"
             (click)="testDownloadPath()"
-            [disabled]="saving"
-            [ngClass]="{ 'is-loading': saving }"
+            [disabled]="pathTesting"
+            [ngClass]="{ 'is-loading': pathTesting }"
           >
             Test permissions
           </button>
-        }
-        @if (testPathError) {
-          <div class="notification is-danger is-light">{{ testPathError }}</div>
-        }
-        @if (testPathSuccess) {
-          <div class="notification is-success is-light">Download path is writable.</div>
-        }
-      </div>
-      <p class="help">Checks whether the download folder has write permissions.</p>
-    </div>
-    <div class="field">
-      <label class="label">Test internet download speed</label>
-      <div class="control">
-        @if (testDownloadSpeedError) {
-          <div class="notification is-danger is-light">{{ testDownloadSpeedError }}</div>
-        } @else if (testDownloadSpeedSuccess) {
-          <div class="notification is-success is-light">
-            Download speed: {{ testDownloadSpeedSuccess | filesize }}/s
-          </div>
-        } @else {
+          @if (testPathError) {
+            <div class="notification is-danger is-light mt-4" role="alert">{{ testPathError }}</div>
+          }
+          @if (testPathSuccess) {
+            <div class="notification is-success is-light mt-4" role="status">Download path is writable.</div>
+          }
+        </article>
+
+        <article class="box diagnostic-card">
+          <h3 class="title is-6">Internet download speed</h3>
+          <p class="help mb-4">Downloads up to 50 MB from Cloudflare and removes the test file afterward.</p>
           <button
             class="button is-warning"
+            type="button"
             (click)="testDownloadSpeed()"
-            [disabled]="saving"
-            [ngClass]="{ 'is-loading': saving }"
+            [disabled]="downloadSpeedTesting"
+            [ngClass]="{ 'is-loading': downloadSpeedTesting }"
           >
             Test download speed
           </button>
-        }
-      </div>
-      <p class="help">Downloads up to 50 MB from Cloudflare's speed-test endpoint to measure throughput.</p>
-    </div>
-    <div class="field">
-      <label class="label">Test write speed</label>
-      <div class="control">
-        @if (testWriteSpeedError) {
-          <div class="notification is-danger is-light">{{ testWriteSpeedError }}</div>
-        } @else if (testWriteSpeedSuccess) {
-          <div class="notification is-success is-light">Write speed: {{ testWriteSpeedSuccess | filesize }}/s</div>
-        } @else {
+          @if (testDownloadSpeedError) {
+            <div class="notification is-danger is-light mt-4" role="alert">{{ testDownloadSpeedError }}</div>
+          }
+          @if (testDownloadSpeedSuccess !== null) {
+            <div class="notification is-success is-light mt-4" role="status">
+              Download speed: {{ testDownloadSpeedSuccess | filesize }}/s
+            </div>
+          }
+        </article>
+
+        <article class="box diagnostic-card">
+          <h3 class="title is-6">Disk write speed</h3>
+          <p class="help mb-4">Writes 64 MB to the saved local download path and removes the test file afterward.</p>
           <button
             class="button is-warning"
+            type="button"
             (click)="testWriteSpeed()"
-            [disabled]="saving"
-            [ngClass]="{ 'is-loading': saving }"
+            [disabled]="writeSpeedTesting"
+            [ngClass]="{ 'is-loading': writeSpeedTesting }"
           >
             Test write speed
           </button>
-        }
+          @if (testWriteSpeedError) {
+            <div class="notification is-danger is-light mt-4" role="alert">{{ testWriteSpeedError }}</div>
+          }
+          @if (testWriteSpeedSuccess !== null) {
+            <div class="notification is-success is-light mt-4" role="status">
+              Write speed: {{ testWriteSpeedSuccess | filesize }}/s
+            </div>
+          }
+        </article>
       </div>
-      <p class="help">Writes a small file to the download folder to measure disk write speed.</p>
-    </div>
-  </div>
-}
-
-<div class="field">
-  <div class="control">
-    @if (error?.length > 0) {
-      <div class="notification is-danger is-light">Error saving settings: {{ error }}</div>
-    }
-  </div>
-</div>
-
-@if (activeTab === 0) {
-  <div class="field">
-    <label class="label">Register client as magnet link handler</label>
-    <div class="control">
-      <button
-        class="button is-info"
-        type="button"
-        (click)="registerMagnetHandler()"
-        [disabled]="!canRegisterMagnetHandler"
-      >
-        {{ canRegisterMagnetHandler ? 'Register Handler' : 'Unavailable in This Browser' }}
-      </button>
-    </div>
-    <p class="help">
-      @if (canRegisterMagnetHandler) {
-        Registers this client as your browser's default handler for magnet links.
-      } @else {
-        Magnet link registration is unavailable. Your
-        <a
-          href="https://caniuse.com/mdn-api_navigator_registerprotocolhandler"
-          target="_blank"
-          rel="noopener noreferrer"
-          >browser may not support this feature</a
-        >, or the client is not served in a
-        <a
-          href="https://developer.mozilla.org/en-US/docs/Glossary/Secure_Context/"
-          target="_blank"
-          rel="noopener noreferrer"
-          >secure context</a
-        >.
-      }
-    </p>
-  </div>
-}
-
-@if (activeTab === 100) {
-  <div class="field">
-    <label class="label">Login username</label>
-    <div class="control">
-      <input class="input" type="text" minlength="1" [(ngModel)]="profileUsername" />
-    </div>
-    <p class="help">Change the username used to log in. Leave blank to keep the current username.</p>
-  </div>
-  <div class="field">
-    <label class="label">Login password</label>
-    <div class="control">
-      <input class="input" type="password" minlength="1" [(ngModel)]="profilePassword" />
-    </div>
-    <p class="help">Change the password used to log in. Leave blank to keep the current password.</p>
-  </div>
-  @if (profileError) {
-    <div class="notification is-danger is-light">Error saving: {{ profileError }}</div>
+    </section>
   }
-  @if (profileSuccess) {
-    <div class="notification is-success is-light">Profile updated successfully.</div>
-  }
-  <div class="field">
-    <div class="control">
-      <button
-        class="button is-success"
-        (click)="saveProfile()"
-        [disabled]="profileSaving"
-        [ngClass]="{ 'is-loading': profileSaving }"
-      >
-        Save Profile
-      </button>
-    </div>
-  </div>
-}
 
-@if (activeTab < 99) {
-  <div class="field">
-    <div class="control">
-      <button class="button is-success" (click)="ok()" [disabled]="saving" [ngClass]="{ 'is-loading': saving }">
-        Save Settings
-      </button>
-    </div>
-  </div>
+  @if (activeView === accountView) {
+    <section id="settings-panel-account" aria-labelledby="settings-tab-account">
+      <div class="account-panel">
+        <h2 class="title is-5 mb-2">Account</h2>
+        <p class="has-text-grey mb-5">Change the credentials used to access this application.</p>
+
+        <div class="field">
+          <label class="label" for="profile-username">New username</label>
+          <div class="control">
+            <input
+              class="input"
+              id="profile-username"
+              type="text"
+              minlength="1"
+              autocomplete="username"
+              [(ngModel)]="profileUsername"
+            />
+          </div>
+          <p class="help">Leave blank to keep the current username.</p>
+        </div>
+
+        <div class="field">
+          <label class="label" for="profile-password">New password</label>
+          <div class="control">
+            <input
+              class="input"
+              id="profile-password"
+              type="password"
+              minlength="1"
+              autocomplete="new-password"
+              [(ngModel)]="profilePassword"
+            />
+          </div>
+          <p class="help">Leave blank to keep the current password.</p>
+        </div>
+
+        @if (profileError) {
+          <div class="notification is-danger is-light" role="alert">{{ profileError }}</div>
+        }
+        @if (profileSuccess) {
+          <div class="notification is-success is-light" role="status">Account credentials updated.</div>
+        }
+
+        <button
+          class="button is-success"
+          type="button"
+          (click)="saveProfile()"
+          [disabled]="profileSaving || (!profileUsername && !profilePassword)"
+          [ngClass]="{ 'is-loading': profileSaving }"
+        >
+          Update account
+        </button>
+      </div>
+    </section>
+  }
 }

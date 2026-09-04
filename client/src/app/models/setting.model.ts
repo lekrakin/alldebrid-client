@@ -5,5 +5,8 @@ export class Setting {
   description: null | string;
   type: string;
   settings: Setting[];
-  enumValues: { [key: string]: string };
+  enumValues: null | { [key: string]: string };
+  minimum: null | number;
+  maximum: null | number;
+  isSecret: boolean;
 }
