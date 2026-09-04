@@ -5,13 +5,29 @@ namespace AdbClient.Service.Services;
 
 public class Authentication(SignInManager<IdentityUser> signInManager, UserManager<IdentityUser> userManager, UserData userData)
 {
+    private static readonly SemaphoreSlim RegistrationLock = new(1, 1);
+
     public async Task<IdentityResult> Register(string userName, string password)
     {
-        var user = new IdentityUser(userName);
+        await RegistrationLock.WaitAsync();
 
-        var result = await userManager.CreateAsync(user, password);
+        try
+        {
+            if (await GetUser() != null)
+            {
+                return IdentityResult.Failed(new IdentityError
+                {
+                    Code = "AccountAlreadyExists",
+                    Description = "An account already exists."
+                });
+            }
 
-        return result;
+            return await userManager.CreateAsync(new IdentityUser(userName), password);
+        }
+        finally
+        {
+            RegistrationLock.Release();
+        }
     }
 
     public async Task<SignInResult> Login(string userName, string password)

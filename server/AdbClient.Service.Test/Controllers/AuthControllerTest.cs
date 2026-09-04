@@ -101,6 +101,41 @@ public class AuthControllerTest
     }
 
     [Fact]
+    public async Task Register_ConcurrentRequestsCreateOnlyOneAccount()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var dataContext = CreateDataContext(connection);
+        await dataContext.Database.EnsureCreatedAsync();
+
+        var userManager = CreateUserManager();
+        userManager.Setup(manager => manager.CreateAsync(
+                       It.IsAny<IdentityUser>(),
+                       It.IsAny<string>()))
+                   .Returns<IdentityUser, string>(async (user, _) =>
+                   {
+                       dataContext.Users.Add(new IdentityUser(user.UserName!));
+                       await dataContext.SaveChangesAsync();
+                       return IdentityResult.Success;
+                   });
+        var userData = new UserData(dataContext);
+        var first = new Authentication(null!, userManager.Object, userData);
+        var second = new Authentication(null!, userManager.Object, userData);
+
+        var results = await Task.WhenAll(
+            first.Register("first-user", "first-password"),
+            second.Register("second-user", "second-password"));
+
+        Assert.Single(results, result => result.Succeeded);
+        var failed = Assert.Single(results, result => !result.Succeeded);
+        Assert.Equal("AccountAlreadyExists", Assert.Single(failed.Errors).Code);
+        Assert.Single(await dataContext.Users.AsNoTracking().ToListAsync());
+        userManager.Verify(
+            manager => manager.CreateAsync(It.IsAny<IdentityUser>(), It.IsAny<string>()),
+            Times.Once());
+    }
+
+    [Fact]
     public async Task SetupProvider_DoesNotReplaceAnExistingApiKey()
     {
         const string existingApiKey = "existing-provider-key";
