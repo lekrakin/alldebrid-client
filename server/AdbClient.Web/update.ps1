@@ -82,6 +82,109 @@ function Test-SameOrDescendant([string]$Parent, [string]$Child) {
            $normalizedChild.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)
 }
 
+function Get-ConfiguredValue($Settings, [string]$Key, $DefaultValue) {
+    $environmentName = $Key.Replace(':', '__')
+    $environmentValue = [Environment]::GetEnvironmentVariable($environmentName)
+    if ($null -ne $environmentValue) {
+        return $environmentValue
+    }
+
+    $configuredValue = $Settings
+    foreach ($segment in $Key.Split(':')) {
+        if ($null -eq $configuredValue) {
+            return $DefaultValue
+        }
+
+        $property = $configuredValue.PSObject.Properties[$segment]
+        if ($null -eq $property) {
+            return $DefaultValue
+        }
+
+        $configuredValue = $property.Value
+    }
+
+    if ($null -eq $configuredValue) {
+        return $DefaultValue
+    }
+
+    return $configuredValue.ToString()
+}
+
+function Resolve-ConfiguredPath([string]$Path, [string]$BasePath, [string]$SettingName) {
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        throw "$SettingName must not be blank."
+    }
+
+    $trimmedPath = $Path.Trim()
+    try {
+        if ([IO.Path]::IsPathRooted($trimmedPath)) {
+            return [IO.Path]::GetFullPath($trimmedPath)
+        }
+
+        return [IO.Path]::GetFullPath((Join-Path $BasePath $trimmedPath))
+    } catch {
+        throw "$SettingName is not a valid filesystem path."
+    }
+}
+
+function Resolve-ConfiguredFilePath(
+    [string]$Path,
+    [string]$DataPath,
+    [string]$SettingName,
+    [string]$DefaultFileName
+) {
+    $configuredPath = if ([string]::IsNullOrWhiteSpace($Path)) { $DefaultFileName } else { $Path.Trim() }
+
+    try {
+        $fileName = [IO.Path]::GetFileName($configuredPath)
+    } catch {
+        throw "$SettingName is not a valid filesystem path."
+    }
+
+    if ([string]::IsNullOrWhiteSpace($fileName) -or $fileName -in @('.', '..')) {
+        throw "$SettingName must identify a file, not a directory."
+    }
+
+    $isRooted = [IO.Path]::IsPathRooted($configuredPath)
+    $resolvedPath = Resolve-ConfiguredPath $configuredPath $DataPath $SettingName
+    if (-not $isRooted -and -not (Test-SameOrDescendant $DataPath $resolvedPath)) {
+        throw "Relative $SettingName must remain inside DataPath."
+    }
+
+    return $resolvedPath
+}
+
+function Get-PersistentPaths($Settings, [string]$ApplicationDirectory) {
+    $dataPath = Resolve-ConfiguredPath `
+        (Get-ConfiguredValue $Settings 'DataPath' './data') `
+        $ApplicationDirectory `
+        'DataPath'
+    $databasePath = Resolve-ConfiguredFilePath `
+        (Get-ConfiguredValue $Settings 'Database:Path' $null) `
+        $dataPath `
+        'Database:Path' `
+        'adbclient.db'
+    $logPath = Resolve-ConfiguredFilePath `
+        (Get-ConfiguredValue $Settings 'Logging:File:Path' $null) `
+        $dataPath `
+        'Logging:File:Path' `
+        'adbclient.log'
+
+    return @(
+        [pscustomobject]@{ Name = 'DataPath'; Path = $dataPath }
+        [pscustomobject]@{ Name = 'Database:Path'; Path = $databasePath }
+        [pscustomobject]@{ Name = 'Logging:File:Path'; Path = $logPath }
+    )
+}
+
+function Assert-PersistentPathsOutsideApplication($Settings, [string]$ApplicationDirectory) {
+    foreach ($persistentPath in (Get-PersistentPaths $Settings $ApplicationDirectory)) {
+        if (Test-SameOrDescendant $ApplicationDirectory $persistentPath.Path) {
+            throw "$($persistentPath.Name) '$($persistentPath.Path)' is inside the application directory. Move persistent data outside '$ApplicationDirectory' before using in-place updates."
+        }
+    }
+}
+
 function Assert-StrictChildPath([string]$Parent, [string]$Child) {
     $normalizedParent = [IO.Path]::GetFullPath($Parent).TrimEnd('\', '/')
     $normalizedChild = [IO.Path]::GetFullPath($Child).TrimEnd('\', '/')
@@ -395,19 +498,7 @@ try {
     }
 
     $settings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
-    if ([string]::IsNullOrWhiteSpace($settings.DataPath)) {
-        throw "The installed appsettings.json does not define a persistent DataPath."
-    }
-
-    $dataPath = if ([IO.Path]::IsPathRooted($settings.DataPath)) {
-        [IO.Path]::GetFullPath($settings.DataPath)
-    } else {
-        [IO.Path]::GetFullPath((Join-Path $ApplicationDirectory $settings.DataPath))
-    }
-
-    if (Test-SameOrDescendant $ApplicationDirectory $dataPath) {
-        throw "DataPath '$dataPath' is inside the application directory. Move persistent data outside '$ApplicationDirectory' before using in-place updates."
-    }
+    Assert-PersistentPathsOutsideApplication $settings $ApplicationDirectory
 
     $currentVersion = Get-ApplicationVersion $ApplicationDirectory
     $release = Get-LatestRelease
