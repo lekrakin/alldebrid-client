@@ -106,31 +106,16 @@ public class Torrents(
 
         var enriched = await enricher.EnrichMagnetLink(magnetLink);
 
-        if (!string.IsNullOrWhiteSpace(Settings.Get.Provider.BannedTrackers))
+        try
         {
-            var bannedTrackers = Settings.Get.Provider.BannedTrackers.Split(',');
-
-            foreach (var bannedTracker in bannedTrackers)
-            {
-                var bannedTrackerCompare = bannedTracker.Trim().ToLower();
-
-                if (string.IsNullOrWhiteSpace(bannedTrackerCompare))
-                {
-                    continue;
-                }
-
-                if (magnet.AnnounceUrls != null)
-                {
-                    var bannedUrls = magnet.AnnounceUrls.Where(m => m.Trim().ToLower().Contains(bannedTrackerCompare)).ToList();
-
-                    if (bannedUrls.Count > 0)
-                    {
-                        var bannedUrlsString = string.Join(", ", bannedUrls);
-                        throw new Exception($"Cannot add torrent, the torrent contains banned trackers: {bannedUrlsString}.");
-                    }
-                }
-            }
+            magnet = MagnetLink.Parse(enriched);
         }
+        catch (Exception ex)
+        {
+            throw new InvalidDataException("Tracker enrichment produced an invalid magnet link.", ex);
+        }
+
+        TorrentTrackerPolicy.EnsureAllowed(magnet, Settings.Get.Provider.BannedTrackers);
 
         torrent.RdStatus = TorrentStatus.Queued;
         torrent.RdName = magnet.Name;
@@ -159,6 +144,18 @@ public class Torrents(
 
         var enriched = await enricher.EnrichTorrentBytes(bytes);
 
+        if (!enriched.SequenceEqual(bytes))
+        {
+            try
+            {
+                monoTorrent = await MonoTorrent.Torrent.LoadAsync(enriched);
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidDataException("Tracker enrichment produced an invalid torrent file.", ex);
+            }
+        }
+
         string fileAsBase64;
 
         if (enriched.SequenceEqual(bytes))
@@ -172,36 +169,7 @@ public class Torrents(
             logger.LogDebug($"enriched bytes {enriched}");
         }
 
-        if (!string.IsNullOrWhiteSpace(Settings.Get.Provider.BannedTrackers))
-        {
-            var bannedTrackers = Settings.Get.Provider.BannedTrackers.Split(',');
-
-            foreach (var bannedTracker in bannedTrackers)
-            {
-                var bannedTrackerCompare = bannedTracker.Trim().ToLower();
-
-                if (string.IsNullOrWhiteSpace(bannedTrackerCompare))
-                {
-                    continue;
-                }
-
-                if (!string.IsNullOrWhiteSpace(monoTorrent.Source) && monoTorrent.Source.Contains(bannedTracker))
-                {
-                    throw new Exception($"Cannot add torrent, the torrent source '{monoTorrent.Source}' is a banned tracker.");
-                }
-
-                if (monoTorrent.AnnounceUrls != null)
-                {
-                    var bannedUrls = monoTorrent.AnnounceUrls.SelectMany(m => m).Where(m => m.Trim().ToLower().Contains(bannedTrackerCompare)).ToList();
-
-                    if (bannedUrls.Count > 0)
-                    {
-                        var bannedUrlsString = string.Join(", ", bannedUrls);
-                        throw new Exception($"Cannot add torrent, the torrent contains banned trackers: {bannedUrlsString}.");
-                    }
-                }
-            }
-        }
+        TorrentTrackerPolicy.EnsureAllowed(monoTorrent, Settings.Get.Provider.BannedTrackers);
 
         torrent.RdStatus = TorrentStatus.Queued;
         torrent.RdName = monoTorrent.Name;
