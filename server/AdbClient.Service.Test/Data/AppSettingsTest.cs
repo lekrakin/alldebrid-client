@@ -69,6 +69,22 @@ public class AppSettingsTest
         Assert.Equal(logPath, settings.Logging.File.Path);
     }
 
+    [Fact]
+    public void NormalizeAndValidate_RejectsSharedDatabaseAndLogPath()
+    {
+        var settings = ValidSettings();
+        settings.Database = new AppSettingsDatabase { Path = Path.Combine("shared", "app.data") };
+        settings.Logging = new AppSettingsLogging
+        {
+            File = new AppSettingsLoggingFile { Path = Path.Combine("shared", ".", "app.data") }
+        };
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => settings.NormalizeAndValidate(NewAbsolutePath("app")));
+
+        Assert.Contains("must identify different files", exception.Message);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]

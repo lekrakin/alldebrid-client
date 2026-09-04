@@ -36,6 +36,15 @@ public class AppSettings
         Logging.File ??= new AppSettingsLoggingFile();
         Logging.File.Path = NormalizeFilePath(Logging.File.Path, DataPath, "Logging:File:Path", "adbclient.log");
 
+        var pathComparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+
+        if (string.Equals(Database.Path, Logging.File.Path, pathComparison))
+        {
+            throw new InvalidOperationException("Database:Path and Logging:File:Path must identify different files.");
+        }
+
         if (Logging.File.FileSizeLimitBytes <= 0)
         {
             throw new InvalidOperationException("Logging:File:FileSizeLimitBytes must be greater than zero.");
