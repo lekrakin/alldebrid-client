@@ -1,13 +1,15 @@
 # Docker
 
-Stable multi-platform images are published to [GitHub Container Registry](https://github.com/krakn-dev/alldebrid-client/pkgs/container/alldebrid-client) and [Docker Hub](https://hub.docker.com/r/krakal/alldebrid-client) for `linux/amd64` and `linux/arm64`. Both registries receive the same tags from the same release build.
+The release workflow publishes multi-platform images to [GitHub Container Registry](https://github.com/krakn-dev/alldebrid-client/pkgs/container/alldebrid-client) as `ghcr.io/krakn-dev/alldebrid-client` and [Docker Hub](https://hub.docker.com/r/krakal/alldebrid-client) as `krakal/alldebrid-client` for `linux/amd64` and `linux/arm64`. Both registries receive the same tags from the same release build.
 
 ## Docker Compose
+
+Save this as `compose.yaml`:
 
 ```yaml
 services:
   alldebrid-client:
-    image: ghcr.io/krakn-dev/alldebrid-client:latest
+    image: krakal/alldebrid-client:latest
     container_name: alldebrid-client
     environment:
       PUID: 1000
@@ -29,7 +31,12 @@ services:
 
 Run `docker compose up -d`, then open `http://<host>:6500`.
 
+> [!IMPORTANT]
+> Authentication is disabled by default. Bind the published port only to a trusted network, or create an account and enable username-and-password authentication before exposing it more broadly.
+
 `PUID` and `PGID` should identify the host user that owns the mounted directories. Set `TZ` to an [IANA time zone](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones), such as `America/New_York`.
+
+Keep the container-side application port at `6500`; change only the host side of the mapping when another host port is needed, for example `"8080:6500"`. A custom internal port also requires matching port and health-check overrides.
 
 ## Persistent storage
 
@@ -40,18 +47,24 @@ Run `docker compose up -d`, then open `http://<host>:6500`.
 
 Both paths must use persistent mounts. `/data/downloads` is also the application's default local download path in Docker. Back up `/data/db` before replacing or migrating an installation.
 
+Startup and runtime configuration are separate. The image sets `DataPath=/data/db`; application behavior is configured in the web interface and persisted in the database. See [Configuration](configuration.md) for the complete settings layout.
+
 For integrations running in containers, mount the same host download directory as `/data/downloads` in every container. The shared path lets Sonarr and Radarr import files directly without a Remote Path Mapping. See the [integration guide](integrations.md) for mixed native/container installations.
 
 ## Updating
+
+Update a registry-backed Compose installation with:
 
 ```bash
 docker compose pull
 docker compose up -d
 ```
 
-Releases publish immutable full-version tags plus rolling major, minor, and `latest` tags. Pin a full tag such as `1.5.2` when reproducibility is more important than following stable updates automatically. Existing Docker Hub installations can continue using `krakal/alldebrid-client` without changing their Compose file.
+Successful release builds publish full-version tags plus rolling major, minor, and `latest` tags. Pin an image digest, rather than a mutable tag, when an exactly reproducible deployment is required.
 
-Every release image is built from its matching Git tag. Release images include provenance and a software bill of materials.
+Existing Docker Hub installations can continue using `krakal/alldebrid-client` without changing their Compose file.
+
+Every successfully published release image is built from its matching Git tag and includes provenance and a software bill of materials.
 
 ## Local source build
 

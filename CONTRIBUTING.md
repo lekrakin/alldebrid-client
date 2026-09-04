@@ -92,6 +92,6 @@ Versions follow Semantic Versioning:
 - A `!` or `BREAKING CHANGE:` footer increments the major version.
 - Documentation, tests, refactors, build changes, CI changes, and chores do not create a release unless they include a breaking change.
 
-Release Please maintains a release pull request from commits merged since the latest release. That pull request updates `CHANGELOG.md`, `version.txt`, the .NET assembly version, frontend package metadata, and Docker defaults together. Merging it creates the Git tag and GitHub release. The verified release workflow then uploads the package, checksum, and multi-platform Docker image.
+Release Please maintains a release pull request from commits merged since the latest release. That pull request updates `CHANGELOG.md`, `version.txt`, the .NET assembly version, frontend package metadata, and Docker defaults together. Merging it creates the Git tag and GitHub release. Post-release jobs then build the Windows package and multi-platform container image; successful jobs upload the package, checksum, and image.
 
 Do not manually edit managed version fields or create release tags.
