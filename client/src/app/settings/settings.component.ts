@@ -79,11 +79,13 @@ export class SettingsComponent implements OnInit {
   }
 
   private applySettings(settings: Setting[]): void {
-    const tabs = settings.filter((setting) => !setting.key.includes(':'));
+    const tabs = settings.filter((setting) => setting.type === 'Object' && !setting.parentKey);
 
     for (const tab of tabs) {
       const prefix = `${tab.key}:`;
-      tab.settings = settings.filter((setting) => setting.key.startsWith(prefix));
+      tab.settings = settings.filter(
+        (setting) => setting.parentKey === tab.key || setting.parentKey?.startsWith(prefix)
+      );
     }
 
     this.settingMap = new Map(settings.map((setting) => [setting.key, setting]));
@@ -145,7 +147,7 @@ export class SettingsComponent implements OnInit {
   }
 
   public testDownloadPath(): void {
-    const downloadPath = this.getSetting('Storage:DownloadPath');
+    const downloadPath = this.getSetting('Paths:DownloadPath');
 
     this.pathTesting.set(true);
     this.testPathError.set(null);
@@ -202,12 +204,12 @@ export class SettingsComponent implements OnInit {
 
   public getPlaceholder(setting: Setting): string {
     switch (setting.key) {
-      case 'Integrations:ReportedDownloadPath':
-        return this.getSetting('Storage:DownloadPath') || 'Same as the local download path';
-      case 'WatchFolder:ErrorPath':
-      case 'WatchFolder:ProcessedPath': {
-        const inboxPath = this.getSetting('WatchFolder:InboxPath');
-        const subfolder = setting.key === 'WatchFolder:ErrorPath' ? 'error' : 'processed';
+      case 'Paths:MappedPath':
+        return this.getSetting('Paths:DownloadPath') || 'Same as the local download path';
+      case 'Paths:WatchErrorPath':
+      case 'Paths:WatchProcessedPath': {
+        const inboxPath = this.getSetting('Paths:WatchPath');
+        const subfolder = setting.key === 'Paths:WatchErrorPath' ? 'error' : 'processed';
 
         if (!inboxPath) {
           return `Inside the inbox (${subfolder})`;

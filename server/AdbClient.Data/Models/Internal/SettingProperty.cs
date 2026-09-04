@@ -3,6 +3,7 @@ namespace AdbClient.Data.Models.Internal;
 public class SettingProperty
 {
     public string Key { get; set; } = default!;
+    public string? ParentKey { get; set; }
     public Object? Value { get; set; }
     public string? DisplayName { get; set; }
     public string? Description { get; set; }

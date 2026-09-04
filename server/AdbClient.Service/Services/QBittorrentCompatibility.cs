@@ -71,12 +71,12 @@ public sealed class QBittorrentCompatibility(
         if (existingIndex < 0)
         {
             categories.Add(category);
-            await settings.Update("Integrations:Categories", string.Join(',', categories));
+            await settings.Update("General:Categories", string.Join(',', categories));
         }
         else if (!categories[existingIndex].Equals(category, StringComparison.Ordinal))
         {
             categories[existingIndex] = category;
-            await settings.Update("Integrations:Categories", string.Join(',', categories));
+            await settings.Update("General:Categories", string.Join(',', categories));
         }
     }
 

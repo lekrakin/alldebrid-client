@@ -16,47 +16,14 @@ public class SettingData(DataContext dataContext, ILogger<SettingData> logger)
     private static readonly IReadOnlyDictionary<string, string> LegacySettingKeys =
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["General:DownloadLimit"] = "Downloads:ConcurrentFiles",
-            ["General:UnpackLimit"] = "Downloads:ConcurrentExtractions",
-            ["General:Categories"] = "Integrations:Categories",
-            ["General:RunOnTorrentCompleteFileName"] = "Integrations:CompletionCommand:ExecutablePath",
-            ["General:RunOnTorrentCompleteArguments"] = "Integrations:CompletionCommand:Arguments",
-            ["General:TrackerEnrichmentList"] = "Provider:TrackerEnrichmentList",
-            ["General:TrackerEnrichmentCacheExpiration"] = "Provider:TrackerEnrichmentCacheExpiration",
-            ["General:BannedTrackers"] = "Provider:BannedTrackers",
-            ["DownloadClient:MaxSpeed"] = "Downloads:SpeedLimit",
-            ["DownloadClient:ParallelCount"] = "Downloads:ConnectionsPerFile",
-            ["DownloadClient:ParallelChunkCount"] = "Downloads:ChunksPerFile",
-            ["DownloadClient:AutoImport"] = "Provider:AutoImport",
-            ["DownloadClient:AutoDelete"] = "Provider:AutoDelete",
-            ["DownloadClient:MaxParallelDownloads"] = "Provider:ConcurrentTorrents",
-            ["DownloadClient:DownloadPath"] = "Storage:DownloadPath",
-            ["DownloadClient:MappedPath"] = "Integrations:ReportedDownloadPath",
-            ["DownloadClient:Default:HostDownloadAction"] = "Downloads:Defaults:HostDownloadAction",
-            ["DownloadClient:Default:Category"] = "Downloads:Defaults:Category",
-            ["DownloadClient:Default:FinishedAction"] = "Downloads:Defaults:FinishedAction",
-            ["DownloadClient:Default:FinishedActionDelay"] = "Downloads:Defaults:FinishedActionDelay",
-            ["DownloadClient:Default:MinFileSize"] = "Downloads:Defaults:MinFileSize",
-            ["DownloadClient:Default:IncludeRegex"] = "Downloads:Defaults:IncludeRegex",
-            ["DownloadClient:Default:ExcludeRegex"] = "Downloads:Defaults:ExcludeRegex",
-            ["DownloadClient:Default:TorrentRetryAttempts"] = "Downloads:Defaults:TorrentRetryAttempts",
-            ["DownloadClient:Default:DownloadRetryAttempts"] = "Downloads:Defaults:DownloadRetryAttempts",
-            ["DownloadClient:Default:DeleteOnError"] = "Downloads:Defaults:DeleteOnError",
-            ["DownloadClient:Default:TorrentLifetime"] = "Downloads:Defaults:TorrentLifetime",
-            ["DownloadClient:Default:Priority"] = "Downloads:Defaults:Priority",
-            ["Provider:Default:Category"] = "Downloads:Defaults:Category",
-            ["Provider:Default:MinFileSize"] = "Downloads:Defaults:MinFileSize",
-            ["Provider:Default:TorrentRetryAttempts"] = "Downloads:Defaults:TorrentRetryAttempts",
-            ["Provider:Default:DownloadRetryAttempts"] = "Downloads:Defaults:DownloadRetryAttempts",
-            ["Provider:Default:DeleteOnError"] = "Downloads:Defaults:DeleteOnError",
-            ["Provider:Default:TorrentLifetime"] = "Downloads:Defaults:TorrentLifetime",
-            ["Paths:DownloadPath"] = "Storage:DownloadPath",
-            ["Paths:MappedPath"] = "Integrations:ReportedDownloadPath",
-            ["Paths:CopyAddedTorrents"] = "Integrations:AddedTorrentCopyPath",
-            ["Paths:WatchPath"] = "WatchFolder:InboxPath",
-            ["Paths:WatchErrorPath"] = "WatchFolder:ErrorPath",
-            ["Paths:WatchProcessedPath"] = "WatchFolder:ProcessedPath",
-            ["Watch:Interval"] = "WatchFolder:Interval"
+            ["DownloadClient:DownloadPath"] = "Paths:DownloadPath",
+            ["DownloadClient:MappedPath"] = "Paths:MappedPath",
+            ["Provider:Default:Category"] = "DownloadClient:Default:Category",
+            ["Provider:Default:MinFileSize"] = "DownloadClient:Default:MinFileSize",
+            ["Provider:Default:TorrentRetryAttempts"] = "DownloadClient:Default:TorrentRetryAttempts",
+            ["Provider:Default:DownloadRetryAttempts"] = "DownloadClient:Default:DownloadRetryAttempts",
+            ["Provider:Default:DeleteOnError"] = "DownloadClient:Default:DeleteOnError",
+            ["Provider:Default:TorrentLifetime"] = "DownloadClient:Default:TorrentLifetime",
         };
 
     private static DbSettings _current = new();
@@ -198,53 +165,53 @@ public class SettingData(DataContext dataContext, ILogger<SettingData> logger)
     private void NormalizeAndValidate(DbSettings settings, bool rejectInvalidValues)
     {
         settings.Integrations.Categories = NormalizeCategories(
-            "Integrations:Categories",
+            "General:Categories",
             settings.Integrations.Categories,
             rejectInvalidValues);
         settings.Provider.BannedTrackers = NormalizeList(settings.Provider.BannedTrackers);
         settings.Downloads.Defaults.Category = NormalizeCategory(
-            "Downloads:Defaults:Category",
+            "DownloadClient:Default:Category",
             settings.Downloads.Defaults.Category,
             rejectInvalidValues);
         settings.Downloads.Defaults.IncludeRegex = ValidateRegex(
-            "Downloads:Defaults:IncludeRegex",
+            "DownloadClient:Default:IncludeRegex",
             settings.Downloads.Defaults.IncludeRegex,
             rejectInvalidValues);
         settings.Downloads.Defaults.ExcludeRegex = ValidateRegex(
-            "Downloads:Defaults:ExcludeRegex",
+            "DownloadClient:Default:ExcludeRegex",
             settings.Downloads.Defaults.ExcludeRegex,
             rejectInvalidValues);
         settings.Provider.TrackerEnrichmentList = ValidateHttpUrl(
-            "Provider:TrackerEnrichmentList",
+            "General:TrackerEnrichmentList",
             settings.Provider.TrackerEnrichmentList,
             rejectInvalidValues);
         settings.Storage.DownloadPath = NormalizeLocalPath(
-            "Storage:DownloadPath",
+            "Paths:DownloadPath",
             settings.Storage.DownloadPath,
             new DbSettingsStorage().DownloadPath,
             rejectInvalidValues)!;
         settings.Integrations.AddedTorrentCopyPath = NormalizeLocalPath(
-            "Integrations:AddedTorrentCopyPath",
+            "Paths:CopyAddedTorrents",
             settings.Integrations.AddedTorrentCopyPath,
             null,
             rejectInvalidValues);
         settings.Integrations.CompletionCommand.ExecutablePath = NormalizeLocalPath(
-            "Integrations:CompletionCommand:ExecutablePath",
+            "General:RunOnTorrentCompleteFileName",
             settings.Integrations.CompletionCommand.ExecutablePath,
             null,
             rejectInvalidValues);
         settings.WatchFolder.InboxPath = NormalizeLocalPath(
-            "WatchFolder:InboxPath",
+            "Paths:WatchPath",
             settings.WatchFolder.InboxPath,
             null,
             rejectInvalidValues);
         settings.WatchFolder.ProcessedPath = NormalizeLocalPath(
-            "WatchFolder:ProcessedPath",
+            "Paths:WatchProcessedPath",
             settings.WatchFolder.ProcessedPath,
             null,
             rejectInvalidValues);
         settings.WatchFolder.ErrorPath = NormalizeLocalPath(
-            "WatchFolder:ErrorPath",
+            "Paths:WatchErrorPath",
             settings.WatchFolder.ErrorPath,
             null,
             rejectInvalidValues);
@@ -437,9 +404,9 @@ public class SettingData(DataContext dataContext, ILogger<SettingData> logger)
     {
         const string legacyWindowsDefault = @"C:\Downloads";
 
-        var downloadPath = settings.FirstOrDefault(setting => setting.SettingId == "Storage:DownloadPath");
+        var downloadPath = settings.FirstOrDefault(setting => setting.SettingId == "Paths:DownloadPath");
         var reportedPath = settings.FirstOrDefault(setting =>
-            setting.SettingId == "Integrations:ReportedDownloadPath");
+            setting.SettingId == "Paths:MappedPath");
         var reportedPathIsRedundant = downloadPath != null &&
                                       reportedPath != null &&
                                       PathsAreEquivalent(downloadPath.Value, reportedPath.Value);
@@ -487,7 +454,8 @@ public class SettingData(DataContext dataContext, ILogger<SettingData> logger)
             var dataType = property.GetCustomAttribute<DataTypeAttribute>();
             var settingProperty = new SettingProperty
             {
-                Key = propertyName,
+                Key = property.GetCustomAttribute<SettingKeyAttribute>()?.Key ?? propertyName,
+                ParentKey = parent,
                 DisplayName = displayName?.DisplayName,
                 Description = description?.Description,
                 Type = property.PropertyType.Name,
@@ -546,7 +514,8 @@ public class SettingData(DataContext dataContext, ILogger<SettingData> logger)
                 property.PropertyType.IsValueType ||
                 property.PropertyType == typeof(string))
             {
-                var setting = settings.FirstOrDefault(item => item.SettingId == propertyName);
+                var settingKey = property.GetCustomAttribute<SettingKeyAttribute>()?.Key ?? propertyName;
+                var setting = settings.FirstOrDefault(item => item.SettingId == settingKey);
 
                 if (setting == null)
                 {
@@ -555,7 +524,7 @@ public class SettingData(DataContext dataContext, ILogger<SettingData> logger)
 
                 try
                 {
-                    var newValue = ConvertStoredValue(property, propertyName, setting.Value);
+                    var newValue = ConvertStoredValue(property, settingKey, setting.Value);
                     ValidateProperty(defaultSetting, property, newValue);
                     property.SetValue(defaultSetting, newValue);
                 }
@@ -564,14 +533,14 @@ public class SettingData(DataContext dataContext, ILogger<SettingData> logger)
                     if (rejectInvalidValues)
                     {
                         throw new ArgumentException(
-                            $"Invalid value for setting '{propertyName}': {ex.Message}",
+                            $"Invalid value for setting '{settingKey}': {ex.Message}",
                             nameof(settings),
                             ex);
                     }
 
                     logger.LogWarning(
                         "Replacing invalid stored value for setting {SettingKey} with its default: {Reason}",
-                        propertyName,
+                        settingKey,
                         ex.Message);
                 }
 

@@ -1,5 +1,6 @@
 export class Setting {
   key: string;
+  parentKey: null | string;
   value: boolean | number | null | string;
   displayName: null | string;
   description: null | string;

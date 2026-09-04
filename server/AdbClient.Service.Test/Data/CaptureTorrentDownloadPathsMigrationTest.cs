@@ -23,8 +23,8 @@ public class CaptureTorrentDownloadPathsMigrationTest
         await dataContext.Database.ExecuteSqlRawAsync(
             """
             INSERT INTO "Settings" ("SettingId", "Value") VALUES
-                ('Storage:DownloadPath', '/storage/original'),
-                ('Integrations:ReportedDownloadPath', '/downloads/original');
+                ('Paths:DownloadPath', '/storage/original'),
+                ('Paths:MappedPath', '/downloads/original');
 
             INSERT INTO "Torrents" (
                 "TorrentId",

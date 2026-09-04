@@ -7,6 +7,8 @@ AllDebrid Client has two configuration layers:
 
 Runtime settings are stored in the application database. They do not belong in `appsettings.json`, and updating the application preserves them when the data directory is persistent.
 
+The Settings page groups related controls without renaming their stored identifiers. Active setting identifiers from version 1.6.0 are retained in the database and settings API.
+
 For a standard Docker or Windows installation, leave the startup defaults in place and complete configuration in the web interface.
 
 ## Startup configuration

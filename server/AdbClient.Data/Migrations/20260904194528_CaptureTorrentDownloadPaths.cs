@@ -26,7 +26,6 @@ namespace AdbClient.Data.Migrations
                 """
                 UPDATE "Torrents"
                 SET "LocalDownloadPath" = COALESCE(
-                    NULLIF(TRIM((SELECT "Value" FROM "Settings" WHERE "SettingId" = 'Storage:DownloadPath')), ''),
                     NULLIF(TRIM((SELECT "Value" FROM "Settings" WHERE "SettingId" = 'Paths:DownloadPath')), ''),
                     NULLIF(TRIM((SELECT "Value" FROM "Settings" WHERE "SettingId" = 'DownloadClient:DownloadPath')), ''),
                     NULLIF(TRIM((SELECT "Value" FROM "Settings" WHERE "SettingId" = 'DownloadPath')), '')
@@ -37,7 +36,6 @@ namespace AdbClient.Data.Migrations
                 """
                 UPDATE "Torrents"
                 SET "ClientReportedDownloadPath" = COALESCE(
-                    NULLIF(TRIM((SELECT "Value" FROM "Settings" WHERE "SettingId" = 'Integrations:ReportedDownloadPath')), ''),
                     NULLIF(TRIM((SELECT "Value" FROM "Settings" WHERE "SettingId" = 'Paths:MappedPath')), ''),
                     NULLIF(TRIM((SELECT "Value" FROM "Settings" WHERE "SettingId" = 'DownloadClient:MappedPath')), ''),
                     NULLIF(TRIM((SELECT "Value" FROM "Settings" WHERE "SettingId" = 'MappedPath')), ''),

@@ -1040,7 +1040,7 @@ public class QBittorrentCompatibilityTest
             await dataContext.Database.EnsureCreatedAsync();
             dataContext.Settings.Add(new Setting
             {
-                SettingId = "Integrations:Categories",
+                SettingId = "General:Categories",
                 Value = "movies,logpose"
             });
             await dataContext.SaveChangesAsync();
@@ -1054,7 +1054,7 @@ public class QBittorrentCompatibilityTest
             await compatibility.CreateCategory("anime");
 
             var stored = await dataContext.Settings.AsNoTracking()
-                                          .SingleAsync(setting => setting.SettingId == "Integrations:Categories");
+                                          .SingleAsync(setting => setting.SettingId == "General:Categories");
             Assert.Equal("movies,LOGPOSE,anime", stored.Value);
         }
         finally
