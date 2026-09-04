@@ -64,7 +64,7 @@ RUN apk add --no-cache \
         libstdc++ \
         zlib \
     && mkdir -p /data/db /data/downloads \
-    && chown -R abc:abc /data
+    && chown abc:abc /data /data/db /data/downloads
 
 COPY --from=dotnet-runtime /usr/share/dotnet /usr/share/dotnet
 
