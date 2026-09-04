@@ -187,6 +187,11 @@ public class TorrentsController(ILogger<TorrentsController> logger, Torrents tor
             return BadRequest();
         }
 
+        if (!request.DeleteData && !request.DeleteRdTorrent && !request.DeleteLocalFiles)
+        {
+            return BadRequest("Select at least one delete action.");
+        }
+
         logger.LogDebug("Delete {torrentId}", torrentId);
 
         await torrents.Delete(torrentId, request.DeleteData, request.DeleteRdTorrent, request.DeleteLocalFiles);

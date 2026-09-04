@@ -453,6 +453,9 @@
             <input type="checkbox" [(ngModel)]="deleteSelectAll" (change)="toggleDeleteSelectAllOptions()" />
             Select All
           </label>
+          @if (!hasDeleteAction()) {
+            <p class="help">Select at least one delete action.</p>
+          }
         </div>
       </div>
       <div class="notification is-primary">
@@ -466,7 +469,7 @@
       <button
         class="button is-success"
         (click)="deleteOk()"
-        [disabled]="deleting()"
+        [disabled]="deleting() || !hasDeleteAction()"
         [ngClass]="{ 'is-loading': deleting() }"
       >
         Delete

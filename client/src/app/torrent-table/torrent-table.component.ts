@@ -109,6 +109,7 @@ export class TorrentTableComponent implements OnInit {
   }
 
   public showDeleteModal(): void {
+    this.deleteSelectAll = false;
     this.deleteData = false;
     this.deleteRdTorrent = false;
     this.deleteLocalFiles = false;
@@ -122,6 +123,11 @@ export class TorrentTableComponent implements OnInit {
   }
 
   public deleteOk(): void {
+    if (!this.hasDeleteAction()) {
+      this.deleteError.set('Select at least one delete action.');
+      return;
+    }
+
     this.deleting.set(true);
 
     const calls: Observable<void>[] = [];
@@ -263,5 +269,9 @@ export class TorrentTableComponent implements OnInit {
 
   updateDeleteSelectAll() {
     this.deleteSelectAll = this.deleteData && this.deleteRdTorrent && this.deleteLocalFiles;
+  }
+
+  public hasDeleteAction(): boolean {
+    return this.deleteData || this.deleteRdTorrent || this.deleteLocalFiles;
   }
 }

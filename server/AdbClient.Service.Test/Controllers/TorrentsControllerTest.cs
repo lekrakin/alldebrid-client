@@ -15,6 +15,42 @@ namespace AdbClient.Service.Test.Controllers;
 
 public class TorrentsControllerTest
 {
+    [Fact]
+    public async Task Delete_NoEffects_ReturnsBadRequestWithoutDeleting()
+    {
+        var torrentData = new Mock<ITorrentData>(MockBehavior.Strict);
+        var controller = CreateController(torrentData.Object);
+
+        var result = await controller.Delete(Guid.NewGuid(), new TorrentControllerDeleteRequest());
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Equal("Select at least one delete action.", badRequest.Value);
+        torrentData.Verify(data => data.GetById(It.IsAny<Guid>()), Times.Never);
+        torrentData.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(false, false, true)]
+    public async Task Delete_WithAnEffect_InvokesDeletion(bool deleteData, bool deleteRdTorrent, bool deleteLocalFiles)
+    {
+        var torrentId = Guid.NewGuid();
+        var torrentData = new Mock<ITorrentData>(MockBehavior.Strict);
+        torrentData.Setup(data => data.GetById(torrentId)).ReturnsAsync((Torrent?)null);
+        var controller = CreateController(torrentData.Object);
+
+        var result = await controller.Delete(torrentId, new TorrentControllerDeleteRequest
+        {
+            DeleteData = deleteData,
+            DeleteRdTorrent = deleteRdTorrent,
+            DeleteLocalFiles = deleteLocalFiles
+        });
+
+        Assert.IsType<OkResult>(result);
+        torrentData.Verify(data => data.GetById(torrentId), Times.Once);
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -56,5 +92,22 @@ public class TorrentsControllerTest
 
         var badRequest = Assert.IsType<BadRequestObjectResult>(result);
         Assert.Contains("Invalid include regular expression", Assert.IsType<string>(badRequest.Value));
+    }
+
+    private static TorrentsController CreateController(ITorrentData torrentData)
+    {
+        var service = new Torrents(
+            Mock.Of<ILogger<Torrents>>(),
+            torrentData,
+            Mock.Of<IDownloads>(),
+            Mock.Of<IProcessFactory>(),
+            new MockFileSystem(),
+            Mock.Of<IEnricher>(),
+            null!);
+
+        return new TorrentsController(
+            Mock.Of<ILogger<TorrentsController>>(),
+            service,
+            null!);
     }
 }
