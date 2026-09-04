@@ -8,7 +8,9 @@ using AdbClient.Data.Models.Data;
 using AdbClient.Data.Models.Internal;
 using AdbClient.Data.Models.TorrentClient;
 using AdbClient.Service.Services;
+using AdbClient.Service.Services.TorrentClients;
 using AdbClient.Service.Wrappers;
+using AllDebridNET;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -983,7 +985,7 @@ public class QBittorrentCompatibilityTest
     }
 
     [Fact]
-    public async Task DeleteWithoutFiles_ReclassifiesAndPreservesLogposeRecord()
+    public async Task DeleteWithoutFiles_RetainsLogposeRecordWhenConfiguredActionIsNone()
     {
         var torrentId = Guid.NewGuid();
         var torrent = new Torrent
@@ -991,7 +993,8 @@ public class QBittorrentCompatibilityTest
             TorrentId = torrentId,
             Hash = "0123456789abcdef0123456789abcdef01234567",
             Category = "logpose",
-            RdName = "One Pace Episode 01"
+            RdName = "One Pace Episode 01",
+            FinishedAction = TorrentFinishedAction.None
         };
 
         var torrentData = new Mock<ITorrentData>();
@@ -1012,6 +1015,120 @@ public class QBittorrentCompatibilityTest
         torrentData.Verify(value => value.UpdateCategory(torrentId, "logpose-retained"), Times.Once);
         downloads.Verify(value => value.DeleteForTorrent(It.IsAny<Guid>()), Times.Never);
         torrentData.Verify(value => value.Delete(It.IsAny<Guid>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData("logpose", TorrentFinishedAction.None, true, false)]
+    [InlineData("logpose", TorrentFinishedAction.RemoveProvider, true, true)]
+    [InlineData("logpose", TorrentFinishedAction.RemoveClient, false, false)]
+    [InlineData("logpose", TorrentFinishedAction.RemoveAllTorrents, false, true)]
+    [InlineData("radarr", TorrentFinishedAction.None, true, false)]
+    [InlineData("radarr", TorrentFinishedAction.RemoveProvider, true, true)]
+    [InlineData("radarr", TorrentFinishedAction.RemoveClient, false, false)]
+    [InlineData("radarr", TorrentFinishedAction.RemoveAllTorrents, false, true)]
+    public async Task DeleteWithoutFiles_HonorsConfiguredActionForEveryCategory(
+        string category,
+        TorrentFinishedAction finishedAction,
+        bool retainsClientRecord,
+        bool removesProviderRecord)
+    {
+        var originalDownloadPath = Settings.Get.Storage.DownloadPath;
+        var downloadRoot = GetTestDownloadRoot();
+        var jobDirectory = Path.Combine(downloadRoot, category, "Job");
+        var localFile = Path.Combine(jobDirectory, "payload.mkv");
+        var fileSystem = new MockFileSystem();
+        fileSystem.AddFile(localFile, new MockFileData("media"));
+
+        try
+        {
+            Settings.Get.Storage.DownloadPath = downloadRoot;
+            var torrent = CreateDeletionTorrent("Job", "payload.mkv");
+            torrent.Category = category;
+            torrent.FinishedAction = finishedAction;
+            torrent.RdId = "123";
+
+            var torrentData = CreateTorrentDataForDelete(torrent);
+            var retainedCategory = $"{category}-retained";
+            torrentData.Setup(data => data.UpdateCategory(torrent.TorrentId, retainedCategory))
+                       .Callback(() => torrent.Category = retainedCategory)
+                       .Returns(Task.CompletedTask);
+
+            var downloads = new Mock<IDownloads>();
+            var provider = new Mock<IAllDebridNETClient>();
+            var providerMagnets = new Mock<IMagnetApi>();
+            provider.SetupGet(client => client.Magnet).Returns(providerMagnets.Object);
+            var compatibility = CreateCompatibility(
+                torrentData: torrentData,
+                downloads: downloads,
+                fileSystem: fileSystem,
+                allDebridClient: provider);
+
+            await compatibility.Delete(torrent.Hash, false);
+
+            Assert.True(fileSystem.File.Exists(localFile));
+            torrentData.Verify(
+                data => data.Delete(torrent.TorrentId),
+                retainsClientRecord ? Times.Never() : Times.Once());
+            downloads.Verify(
+                data => data.DeleteForTorrent(torrent.TorrentId),
+                retainsClientRecord ? Times.Never() : Times.Once());
+            torrentData.Verify(
+                data => data.UpdateCategory(torrent.TorrentId, retainedCategory),
+                retainsClientRecord ? Times.Once() : Times.Never());
+            providerMagnets.Verify(
+                magnets => magnets.DeleteAsync(torrent.RdId, It.IsAny<CancellationToken>()),
+                removesProviderRecord ? Times.Once() : Times.Never());
+        }
+        finally
+        {
+            Settings.Get.Storage.DownloadPath = originalDownloadPath;
+        }
+    }
+
+    [Theory]
+    [InlineData("logpose", TorrentFinishedAction.None)]
+    [InlineData("logpose", TorrentFinishedAction.RemoveProvider)]
+    [InlineData("logpose", TorrentFinishedAction.RemoveClient)]
+    [InlineData("logpose", TorrentFinishedAction.RemoveAllTorrents)]
+    [InlineData("sonarr", TorrentFinishedAction.None)]
+    [InlineData("sonarr", TorrentFinishedAction.RemoveProvider)]
+    [InlineData("sonarr", TorrentFinishedAction.RemoveClient)]
+    [InlineData("sonarr", TorrentFinishedAction.RemoveAllTorrents)]
+    public async Task DeleteWithFiles_RemovesOnlyJobPayloadForEveryConfiguredAction(
+        string category,
+        TorrentFinishedAction finishedAction)
+    {
+        var originalDownloadPath = Settings.Get.Storage.DownloadPath;
+        var downloadRoot = GetTestDownloadRoot();
+        var categoryRoot = Path.Combine(downloadRoot, category);
+        var jobDirectory = Path.Combine(categoryRoot, "Job");
+        var fileSystem = new MockFileSystem();
+        fileSystem.AddFile(Path.Combine(jobDirectory, "payload.mkv"), new MockFileData("media"));
+
+        try
+        {
+            Settings.Get.Storage.DownloadPath = downloadRoot;
+            var torrent = CreateDeletionTorrent("Job", "payload.mkv");
+            torrent.Category = category;
+            torrent.FinishedAction = finishedAction;
+
+            var torrentData = CreateTorrentDataForDelete(torrent);
+            var retainedCategory = $"{category}-retained";
+            torrentData.Setup(data => data.UpdateCategory(torrent.TorrentId, retainedCategory))
+                       .Callback(() => torrent.Category = retainedCategory)
+                       .Returns(Task.CompletedTask);
+            var compatibility = CreateCompatibility(torrentData: torrentData, fileSystem: fileSystem);
+
+            await compatibility.Delete(torrent.Hash, true);
+
+            Assert.False(fileSystem.Directory.Exists(jobDirectory));
+            Assert.True(fileSystem.Directory.Exists(categoryRoot));
+            Assert.True(fileSystem.Directory.Exists(downloadRoot));
+        }
+        finally
+        {
+            Settings.Get.Storage.DownloadPath = originalDownloadPath;
+        }
     }
 
     [Fact]
@@ -1368,7 +1485,7 @@ public class QBittorrentCompatibilityTest
     }
 
     [Fact]
-    public async Task DeleteWithoutFiles_WithoutLogposeCategoryRemovesRecordAndPreservesDownloadRoot()
+    public async Task DeleteWithoutFiles_RemoveAllPolicyRemovesUncategorizedRecordAndPreservesDownloadRoot()
     {
         const string jobName = "One Pace Episode 01";
         var originalDownloadPath = Settings.Get.Storage.DownloadPath;
@@ -1534,34 +1651,78 @@ public class QBittorrentCompatibilityTest
         torrentData.Verify(data => data.GetByHash(It.IsAny<string>()), Times.Never);
     }
 
-    [Fact]
-    public async Task DeleteWithoutFiles_RetryIsIdempotentForRetainedLogposeRecord()
+    [Theory]
+    [InlineData("logpose")]
+    [InlineData("radarr")]
+    public async Task DeleteWithoutFiles_RetryDoesNotInferDirectoryFromRetainedCategory(string category)
     {
-        const string jobName = "One Pace Episode 01";
+        const string jobName = "Imported Job";
         var originalDownloadPath = Settings.Get.Storage.DownloadPath;
         var downloadRoot = GetTestDownloadRoot();
-        var jobDirectory = Path.Combine(downloadRoot, "logpose", jobName);
+        var jobDirectory = Path.Combine(downloadRoot, category, jobName);
+        var importedFile = Path.Combine(jobDirectory, "payload.mkv");
         var fileSystem = new MockFileSystem();
-        fileSystem.AddDirectory(jobDirectory);
+        fileSystem.AddFile(importedFile, new MockFileData("media"));
 
         try
         {
             Settings.Get.Storage.DownloadPath = downloadRoot;
-            var torrent = CreateDeletionTorrent(jobName, "episode.mkv");
+            var torrent = CreateDeletionTorrent(jobName, "payload.mkv");
+            torrent.Category = category;
+            torrent.FinishedAction = TorrentFinishedAction.None;
             var torrentData = new Mock<ITorrentData>();
             torrentData.Setup(data => data.GetByHash(torrent.Hash)).ReturnsAsync(torrent);
-            torrentData.Setup(data => data.UpdateCategory(torrent.TorrentId, "logpose-retained"))
-                       .Callback(() => torrent.Category = "logpose-retained")
+            torrentData.Setup(data => data.UpdateCategory(torrent.TorrentId, $"{category}-retained"))
+                       .Callback(() => torrent.Category = $"{category}-retained")
                        .Returns(Task.CompletedTask);
             torrentData.Setup(data => data.GetById(torrent.TorrentId)).ReturnsAsync(torrent);
             var compatibility = CreateCompatibility(torrentData: torrentData, fileSystem: fileSystem);
 
             await compatibility.Delete(torrent.Hash, false);
+            Assert.True(fileSystem.Directory.Exists(jobDirectory));
+
+            fileSystem.File.Delete(importedFile);
             await compatibility.Delete(torrent.Hash, false);
 
-            Assert.False(fileSystem.Directory.Exists(jobDirectory));
-            torrentData.Verify(value => value.UpdateCategory(torrent.TorrentId, "logpose-retained"), Times.Once);
+            Assert.True(fileSystem.Directory.Exists(jobDirectory));
+            torrentData.Verify(
+                value => value.UpdateCategory(torrent.TorrentId, $"{category}-retained"),
+                Times.Once);
             torrentData.Verify(value => value.Delete(It.IsAny<Guid>()), Times.Never);
+        }
+        finally
+        {
+            Settings.Get.Storage.DownloadPath = originalDownloadPath;
+        }
+    }
+
+    [Fact]
+    public async Task DeleteWithoutFiles_LegitimateRetainedSuffixDoesNotTargetSiblingCategory()
+    {
+        const string category = "movies-retained";
+        const string jobName = "Same Name";
+        var originalDownloadPath = Settings.Get.Storage.DownloadPath;
+        var downloadRoot = GetTestDownloadRoot();
+        var categoryJob = Path.Combine(downloadRoot, category, jobName);
+        var siblingJob = Path.Combine(downloadRoot, "movies", jobName);
+        var fileSystem = new MockFileSystem();
+        fileSystem.AddDirectory(categoryJob);
+        fileSystem.AddDirectory(siblingJob);
+
+        try
+        {
+            Settings.Get.Storage.DownloadPath = downloadRoot;
+            var torrent = CreateDeletionTorrent(jobName, "payload.mkv");
+            torrent.Category = category;
+            torrent.FinishedAction = TorrentFinishedAction.None;
+            var torrentData = CreateTorrentDataForDelete(torrent);
+            var compatibility = CreateCompatibility(torrentData: torrentData, fileSystem: fileSystem);
+
+            await compatibility.Delete(torrent.Hash, false);
+
+            Assert.False(fileSystem.Directory.Exists(categoryJob));
+            Assert.True(fileSystem.Directory.Exists(siblingJob));
+            torrentData.Verify(data => data.Delete(It.IsAny<Guid>()), Times.Never);
         }
         finally
         {
@@ -1614,13 +1775,22 @@ public class QBittorrentCompatibilityTest
         Mock<IEnricher>? enricher = null,
         Mock<IHttpClientFactory>? httpClientFactory = null,
         MockFileSystem? fileSystem = null,
-        Settings? settings = null)
+        Settings? settings = null,
+        Mock<IAllDebridNETClient>? allDebridClient = null)
     {
         torrentData ??= new();
         downloads ??= new();
         enricher ??= new();
         httpClientFactory ??= new();
         fileSystem ??= new();
+        allDebridClient ??= new();
+
+        var allDebridClientFactory = new Mock<IAllDebridNetClientFactory>();
+        allDebridClientFactory.Setup(factory => factory.GetClient()).Returns(allDebridClient.Object);
+        var allDebridTorrentClient = new AllDebridTorrentClient(
+            Mock.Of<ILogger<AllDebridTorrentClient>>(),
+            allDebridClientFactory.Object,
+            Mock.Of<IDownloadableFileFilter>());
 
         var processFactory = new Mock<IProcessFactory>();
         var torrents = new Torrents(
@@ -1630,7 +1800,7 @@ public class QBittorrentCompatibilityTest
             processFactory.Object,
             fileSystem,
             enricher.Object,
-            null!);
+            allDebridTorrentClient);
 
         return new(
             Mock.Of<ILogger<QBittorrentCompatibility>>(),

@@ -19,9 +19,7 @@ public sealed class QBittorrentCompatibility(
     public const int MaxTorrentFileSizeBytes = 32 * 1024 * 1024;
 
     private const long UnknownEta = 8_640_000;
-    private const string LogposeCategory = "logpose";
     private const string RetainedCategorySuffix = "-retained";
-    private const string LogposeRetainedCategory = LogposeCategory + RetainedCategorySuffix;
 
     public async Task<bool> Login(string userName, string password)
     {
@@ -275,29 +273,9 @@ public sealed class QBittorrentCompatibility(
                 continue;
             }
 
-            var retainLogposeJob = !deleteFiles && IsLogposeManagedCategory(torrent.Category);
             var cleanupPlan = deleteFiles
                 ? null
-                : CreateEmptyDirectoryCleanupPlan(
-                    torrent,
-                    string.Equals(torrent.Category, LogposeRetainedCategory, StringComparison.OrdinalIgnoreCase)
-                        ? LogposeCategory
-                        : null);
-
-            if (retainLogposeJob)
-            {
-                // Logpose uses deleteFiles=false after a successful import. Move the job out
-                // of its active category so Logpose can finish, while leaving ADC and the
-                // provider record under the user's configured retention policy.
-                await MoveToRetainedCategory(torrent, hash);
-
-                if (cleanupPlan != null)
-                {
-                    CleanupEmptyJobDirectories(cleanupPlan);
-                }
-
-                continue;
-            }
+                : CreateEmptyDirectoryCleanupPlan(torrent);
 
             switch (torrent.FinishedAction)
             {
@@ -306,6 +284,7 @@ public sealed class QBittorrentCompatibility(
                     break;
                 case TorrentFinishedAction.RemoveProvider:
                     await torrents.Delete(torrent.TorrentId, false, true, deleteFiles);
+                    await MoveToRetainedCategory(torrent, hash);
                     break;
                 case TorrentFinishedAction.RemoveClient:
                     await torrents.Delete(torrent.TorrentId, true, false, deleteFiles);
@@ -321,7 +300,7 @@ public sealed class QBittorrentCompatibility(
                     logger.LogDebug(
                         "Retaining qBittorrent record {TorrentHash} under its configured finished action",
                         torrent.Hash);
-                    continue;
+                    break;
                 default:
                     throw new ArgumentOutOfRangeException(
                         nameof(torrent.FinishedAction),
@@ -375,12 +354,6 @@ public sealed class QBittorrentCompatibility(
         return normalized;
     }
 
-    private static bool IsLogposeManagedCategory(string? category)
-    {
-        return string.Equals(category, LogposeCategory, StringComparison.OrdinalIgnoreCase) ||
-               string.Equals(category, LogposeRetainedCategory, StringComparison.OrdinalIgnoreCase);
-    }
-
     private async Task MoveToRetainedCategory(Torrent torrent, string hash)
     {
         if (string.IsNullOrWhiteSpace(torrent.Category) ||
@@ -394,9 +367,7 @@ public sealed class QBittorrentCompatibility(
         torrent.Category = retainedCategory;
     }
 
-    private EmptyDirectoryCleanupPlan? CreateEmptyDirectoryCleanupPlan(
-        Torrent torrent,
-        string? categoryOverride = null)
+    private EmptyDirectoryCleanupPlan? CreateEmptyDirectoryCleanupPlan(Torrent torrent)
     {
         if (string.IsNullOrWhiteSpace(Settings.Get.Storage.DownloadPath) ||
             string.IsNullOrWhiteSpace(torrent.RdName))
@@ -407,10 +378,9 @@ public sealed class QBittorrentCompatibility(
         try
         {
             var downloadRoot = FileSystemPath.Normalize(Settings.Get.Storage.DownloadPath);
-            var cleanupCategory = categoryOverride ?? torrent.Category;
-            var categoryRoot = string.IsNullOrWhiteSpace(cleanupCategory)
+            var categoryRoot = string.IsNullOrWhiteSpace(torrent.Category)
                 ? downloadRoot
-                : FileSystemPath.Normalize(fileSystem.Path.Combine(downloadRoot, cleanupCategory));
+                : FileSystemPath.Normalize(fileSystem.Path.Combine(downloadRoot, torrent.Category));
 
             if (!FileSystemPath.IsSameOrDescendant(categoryRoot, downloadRoot))
             {
