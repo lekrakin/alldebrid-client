@@ -1,5 +1,6 @@
 using System.IO.Abstractions;
 using AdbClient.Data.Enums;
+using AdbClient.Data.Helpers;
 using AdbClient.Data.Models.Data;
 using AdbClient.Service.Helpers;
 using AdbClient.Service.Models.QBittorrent;
@@ -354,19 +355,11 @@ public sealed class QBittorrentCompatibility(
 
     private static string? NormalizeCategory(string? category)
     {
-        if (string.IsNullOrWhiteSpace(category))
+        var normalized = TorrentCategory.Normalize(category);
+
+        if (normalized == null)
         {
             return null;
-        }
-
-        var normalized = category.Trim();
-        var segments = normalized.Split('/');
-
-        if (normalized.Contains('\\') ||
-            segments.Any(segment => string.IsNullOrWhiteSpace(segment) || segment is "." or "..") ||
-            normalized.Any(character => character < ' ' || "<>,:\"|?*".Contains(character)))
-        {
-            throw new ArgumentException($"Invalid torrent category: {category}", nameof(category));
         }
 
         var downloadRoot = FileSystemPath.Normalize(Settings.Get.Paths.DownloadPath);

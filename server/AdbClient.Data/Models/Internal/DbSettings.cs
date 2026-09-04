@@ -1,5 +1,6 @@
-using AdbClient.Data.Enums;
 using System.ComponentModel;
+using System.ComponentModel.DataAnnotations;
+using AdbClient.Data.Enums;
 
 // ReSharper disable AutoPropertyCanBeMadeGetOnly.Global
 
@@ -36,10 +37,12 @@ public class DbSettingsGeneral
 
     [DisplayName("Maximum parallel downloads")]
     [Description("Max simultaneous active downloads to your host.")]
+    [Range(1, int.MaxValue)]
     public int DownloadLimit { get; set; } = 2;
 
     [DisplayName("Maximum unpack processes")]
     [Description("Max simultaneous extractions. 0 disables unpacking.")]
+    [Range(0, int.MaxValue)]
     public int UnpackLimit { get; set; } = 1;
 
     [DisplayName("Categories")]
@@ -64,6 +67,7 @@ public class DbSettingsGeneral
 
     [DisplayName("Tracker enrichment cache expiration")]
     [Description("Minutes to cache the tracker list. 0 disables caching.")]
+    [Range(0, int.MaxValue)]
     public int TrackerEnrichmentCacheExpiration { get; set; } = 60;
 
     [DisplayName("Banned Trackers")]
@@ -79,14 +83,17 @@ public class DbSettingsDownloadClient
 {
     [DisplayName("Download speed (MB/s)")]
     [Description("Max download speed in MB/s. 0 = unlimited. Internal downloader only.")]
+    [Range(0, int.MaxValue)]
     public int MaxSpeed { get; set; } = 0;
 
     [DisplayName("Parallel connections per download")]
-    [Description("Connections per file (maximum 16). 0 disables parallelism. Internal downloader only.")]
+    [Description("Connections per file (maximum 16). 0 or 1 uses one connection. Internal downloader only.")]
+    [Range(0, 16)]
     public int ParallelCount { get; set; } = 8;
 
     [DisplayName("Parallel chunks per download")]
     [Description("Number of chunks used to split each download (maximum 128). 0 = default (8). Internal downloader only.")]
+    [Range(0, 128)]
     public int ParallelChunkCount { get; set; } = 0;
 
     [DisplayName("Auto-import from provider")]
@@ -99,6 +106,7 @@ public class DbSettingsDownloadClient
 
     [DisplayName("Max parallel downloads")]
     [Description("Max torrents queued for provider download at once. 0 = no limit.")]
+    [Range(0, int.MaxValue)]
     public int MaxParallelDownloads { get; set; } = 0;
 
     [DisplayName("Defaults")]
@@ -109,6 +117,7 @@ public class DbSettingsPaths
 {
     [DisplayName("Local download path")]
     [Description("Physical directory where AllDebrid Client writes downloaded files.")]
+    [Required(AllowEmptyStrings = false)]
     public string DownloadPath { get; set; } = GetDefaultDownloadPath();
 
     [DisplayName("Client-visible download path (advanced)")]
@@ -148,14 +157,17 @@ public class DbSettingsProvider
     [DisplayName("API Key")]
     [Description(@"You can find your AllDebrid API key here:
 <a href=""https://alldebrid.com/apikeys/"" target=""_blank"" rel=""noopener"">https://alldebrid.com/apikeys/</a>")]
+    [DataType(DataType.Password)]
     public string ApiKey { get; set; } = "";
 
     [DisplayName("Connection timeout (seconds)")]
     [Description("Seconds before a provider connection times out. Increase if you see timeout errors in logs.")]
+    [Range(1, int.MaxValue)]
     public int Timeout { get; set; } = 10;
 
     [DisplayName("Check interval (seconds)")]
-    [Description("Seconds between provider API status checks. Minimum 3; tripled when there are no active downloads.")]
+    [Description("Seconds between provider API status checks. Minimum 5; tripled when there are no active downloads.")]
+    [Range(5, int.MaxValue)]
     public int CheckInterval { get; set; } = 10;
 }
 
@@ -163,6 +175,7 @@ public class DbSettingsWatch
 {
     [DisplayName("Check interval (seconds)")]
     [Description("Seconds between watch folder scans.")]
+    [Range(1, int.MaxValue)]
     public int Interval { get; set; } = 60;
 }
 
@@ -182,6 +195,7 @@ public class DbSettingsDefaultsWithCategory : DbSettingsDefaults
 
     [DisplayName("Finished action delay (minutes)")]
     [Description("Minutes to wait before running the finished action.")]
+    [Range(0, int.MaxValue)]
     public int FinishedActionDelay { get; set; } = 0;
 }
 
@@ -191,8 +205,9 @@ public class DbSettingsDefaults
     [Description("Skip files the provider hasn't cached yet.")]
     public bool OnlyDownloadAvailableFiles { get; set; } = true;
 
-    [DisplayName("Minimum file size (bytes)")]
-    [Description("Skip files smaller than this value. 0 = download all. Set a few MB when using *arr to prevent unnecessary re-downloads.")]
+    [DisplayName("Minimum file size (MB)")]
+    [Description("Skip files at or below this size in MB. 0 = download all. Set a small value when using *arr to exclude artwork and metadata files.")]
+    [Range(0, int.MaxValue)]
     public int MinFileSize { get; set; } = 0;
 
     [DisplayName("Include files (regex)")]
@@ -205,21 +220,26 @@ public class DbSettingsDefaults
 
     [DisplayName("Torrent retry attempts")]
     [Description("Times to retry the full torrent after repeated download failures.")]
+    [Range(0, 1000)]
     public int TorrentRetryAttempts { get; set; } = 1;
 
     [DisplayName("Download retry attempts")]
     [Description("Times to retry a single failed download.")]
+    [Range(0, 1000)]
     public int DownloadRetryAttempts { get; set; } = 3;
 
     [DisplayName("Delete on error (minutes)")]
     [Description("Delete from provider and client after this many minutes in error state. 0 to disable.")]
+    [Range(0, 1000)]
     public int DeleteOnError { get; set; } = 0;
 
     [DisplayName("Torrent lifetime (minutes)")]
     [Description("Max age before marking as error. Ignored once downloads are complete. 0 to disable.")]
+    [Range(0, 100000)]
     public int TorrentLifetime { get; set; } = 0;
 
     [DisplayName("Priority")]
     [Description("Download priority (1 = highest). 0 = disabled.")]
+    [Range(0, int.MaxValue)]
     public int Priority { get; set; } = 0;
 }

@@ -1,4 +1,4 @@
-﻿namespace AdbClient.Data.Models.Internal;
+namespace AdbClient.Data.Models.Internal;
 
 public class SettingProperty
 {
@@ -8,4 +8,7 @@ public class SettingProperty
     public string? Description { get; set; }
     public string Type { get; set; } = default!;
     public Dictionary<int, string>? EnumValues { get; set; }
+    public double? Minimum { get; set; }
+    public double? Maximum { get; set; }
+    public bool IsSecret { get; set; }
 }

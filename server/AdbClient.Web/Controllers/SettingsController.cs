@@ -1,12 +1,12 @@
-﻿using System.Diagnostics;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
+using System.Diagnostics;
 using AdbClient.Data.Data;
 using AdbClient.Data.Models.Data;
 using AdbClient.Data.Models.Internal;
 using AdbClient.Service.Helpers;
 using AdbClient.Service.Services;
 using AdbClient.Web.Models.Requests;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace AdbClient.Web.Controllers;
 
@@ -31,9 +31,15 @@ public class SettingsController(Settings settings, Torrents torrents) : Controll
             return BadRequest();
         }
 
-        await settings.Update(settings1);
-
-        return Ok();
+        try
+        {
+            await settings.Update(settings1);
+            return Ok();
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
     }
 
     [HttpGet]
