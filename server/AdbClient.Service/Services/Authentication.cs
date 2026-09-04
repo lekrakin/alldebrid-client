@@ -1,5 +1,5 @@
-﻿using Microsoft.AspNetCore.Identity;
 using AdbClient.Data.Data;
+using Microsoft.AspNetCore.Identity;
 
 namespace AdbClient.Service.Services;
 
@@ -36,25 +36,27 @@ public class Authentication(SignInManager<IdentityUser> signInManager, UserManag
         await signInManager.SignOutAsync();
     }
 
-    public async Task<IdentityResult> Update(string newUserName, string newPassword)
+    public async Task<IdentityResult> Update(string? newUserName, string? newPassword)
     {
         var user = await GetUser() ?? throw new Exception("No logged in user found");
 
         if (!string.IsNullOrWhiteSpace(newUserName))
         {
             user.UserName = newUserName;
+            var updateResult = await userManager.UpdateAsync(user);
+
+            if (!updateResult.Succeeded)
+            {
+                return updateResult;
+            }
         }
 
-        await userManager.UpdateAsync(user);
-
-        if (!string.IsNullOrWhiteSpace(newPassword))
+        if (string.IsNullOrWhiteSpace(newPassword))
         {
-            var token = await userManager.GeneratePasswordResetTokenAsync(user);
-            var result = await userManager.ResetPasswordAsync(user, token, newPassword);
-
-            return result;
+            return IdentityResult.Success;
         }
 
-        return IdentityResult.Success;
+        var token = await userManager.GeneratePasswordResetTokenAsync(user);
+        return await userManager.ResetPasswordAsync(user, token, newPassword);
     }
 }
