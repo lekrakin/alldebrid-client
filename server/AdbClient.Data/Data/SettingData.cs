@@ -14,6 +14,45 @@ namespace AdbClient.Data.Data;
 
 public class SettingData(DataContext dataContext, ILogger<SettingData> logger)
 {
+    private static readonly IReadOnlyDictionary<string, string> LegacySettingKeys =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["General:DownloadLimit"] = "Downloads:ConcurrentFiles",
+            ["General:UnpackLimit"] = "Downloads:ConcurrentExtractions",
+            ["General:Categories"] = "Integrations:Categories",
+            ["General:RunOnTorrentCompleteFileName"] = "Integrations:CompletionCommand:ExecutablePath",
+            ["General:RunOnTorrentCompleteArguments"] = "Integrations:CompletionCommand:Arguments",
+            ["General:TrackerEnrichmentList"] = "Provider:TrackerEnrichmentList",
+            ["General:TrackerEnrichmentCacheExpiration"] = "Provider:TrackerEnrichmentCacheExpiration",
+            ["General:BannedTrackers"] = "Provider:BannedTrackers",
+            ["DownloadClient:MaxSpeed"] = "Downloads:SpeedLimit",
+            ["DownloadClient:ParallelCount"] = "Downloads:ConnectionsPerFile",
+            ["DownloadClient:ParallelChunkCount"] = "Downloads:ChunksPerFile",
+            ["DownloadClient:AutoImport"] = "Provider:AutoImport",
+            ["DownloadClient:AutoDelete"] = "Provider:AutoDelete",
+            ["DownloadClient:MaxParallelDownloads"] = "Provider:ConcurrentTorrents",
+            ["DownloadClient:Default:HostDownloadAction"] = "Downloads:Defaults:HostDownloadAction",
+            ["DownloadClient:Default:Category"] = "Downloads:Defaults:Category",
+            ["DownloadClient:Default:FinishedAction"] = "Downloads:Defaults:FinishedAction",
+            ["DownloadClient:Default:FinishedActionDelay"] = "Downloads:Defaults:FinishedActionDelay",
+            ["DownloadClient:Default:OnlyDownloadAvailableFiles"] = "Downloads:Defaults:OnlyDownloadAvailableFiles",
+            ["DownloadClient:Default:MinFileSize"] = "Downloads:Defaults:MinFileSize",
+            ["DownloadClient:Default:IncludeRegex"] = "Downloads:Defaults:IncludeRegex",
+            ["DownloadClient:Default:ExcludeRegex"] = "Downloads:Defaults:ExcludeRegex",
+            ["DownloadClient:Default:TorrentRetryAttempts"] = "Downloads:Defaults:TorrentRetryAttempts",
+            ["DownloadClient:Default:DownloadRetryAttempts"] = "Downloads:Defaults:DownloadRetryAttempts",
+            ["DownloadClient:Default:DeleteOnError"] = "Downloads:Defaults:DeleteOnError",
+            ["DownloadClient:Default:TorrentLifetime"] = "Downloads:Defaults:TorrentLifetime",
+            ["DownloadClient:Default:Priority"] = "Downloads:Defaults:Priority",
+            ["Paths:DownloadPath"] = "Storage:DownloadPath",
+            ["Paths:MappedPath"] = "Integrations:ReportedDownloadPath",
+            ["Paths:CopyAddedTorrents"] = "Integrations:AddedTorrentCopyPath",
+            ["Paths:WatchPath"] = "WatchFolder:InboxPath",
+            ["Paths:WatchErrorPath"] = "WatchFolder:ErrorPath",
+            ["Paths:WatchProcessedPath"] = "WatchFolder:ProcessedPath",
+            ["Watch:Interval"] = "WatchFolder:Interval"
+        };
+
     private static DbSettings _current = new();
 
     public static DbSettings Get => Volatile.Read(ref _current);
@@ -99,6 +138,9 @@ public class SettingData(DataContext dataContext, ILogger<SettingData> logger)
     public async Task Seed()
     {
         var dbSettings = await dataContext.Settings.ToListAsync();
+        NormalizeLegacyPathDefaults(dbSettings);
+        MigrateLegacySettingKeys(dbSettings);
+
         var expectedSettings = GetSettings(new DbSettings(), null)
                               .Where(setting => setting.Type != "Object")
                               .Select(setting => new Setting
@@ -130,8 +172,6 @@ public class SettingData(DataContext dataContext, ILogger<SettingData> logger)
             }
         }
 
-        NormalizeLegacyPathDefaults(dbSettings);
-
         var normalizedSettings = Materialize(dbSettings, rejectInvalidValues: false);
         WriteCanonicalValues(dbSettings, normalizedSettings);
 
@@ -151,31 +191,58 @@ public class SettingData(DataContext dataContext, ILogger<SettingData> logger)
 
     private void NormalizeAndValidate(DbSettings settings, bool rejectInvalidValues)
     {
-        settings.General.Categories = NormalizeCategories(
-            "General:Categories",
-            settings.General.Categories,
+        settings.Integrations.Categories = NormalizeCategories(
+            "Integrations:Categories",
+            settings.Integrations.Categories,
             rejectInvalidValues);
-        settings.General.BannedTrackers = NormalizeList(settings.General.BannedTrackers);
-        settings.DownloadClient.Default.Category = NormalizeCategory(
-            "DownloadClient:Default:Category",
-            settings.DownloadClient.Default.Category,
+        settings.Provider.BannedTrackers = NormalizeList(settings.Provider.BannedTrackers);
+        settings.Downloads.Defaults.Category = NormalizeCategory(
+            "Downloads:Defaults:Category",
+            settings.Downloads.Defaults.Category,
             rejectInvalidValues);
-        settings.DownloadClient.Default.IncludeRegex = ValidateRegex(
-            "DownloadClient:Default:IncludeRegex",
-            settings.DownloadClient.Default.IncludeRegex,
+        settings.Downloads.Defaults.IncludeRegex = ValidateRegex(
+            "Downloads:Defaults:IncludeRegex",
+            settings.Downloads.Defaults.IncludeRegex,
             rejectInvalidValues);
-        settings.DownloadClient.Default.ExcludeRegex = ValidateRegex(
-            "DownloadClient:Default:ExcludeRegex",
-            settings.DownloadClient.Default.ExcludeRegex,
+        settings.Downloads.Defaults.ExcludeRegex = ValidateRegex(
+            "Downloads:Defaults:ExcludeRegex",
+            settings.Downloads.Defaults.ExcludeRegex,
             rejectInvalidValues);
-        settings.General.TrackerEnrichmentList = ValidateHttpUrl(
-            "General:TrackerEnrichmentList",
-            settings.General.TrackerEnrichmentList,
+        settings.Provider.TrackerEnrichmentList = ValidateHttpUrl(
+            "Provider:TrackerEnrichmentList",
+            settings.Provider.TrackerEnrichmentList,
             rejectInvalidValues);
 
-        if (PathsAreEquivalent(settings.Paths.DownloadPath, settings.Paths.MappedPath))
+        if (PathsAreEquivalent(settings.Storage.DownloadPath, settings.Integrations.ReportedDownloadPath))
         {
-            settings.Paths.MappedPath = null;
+            settings.Integrations.ReportedDownloadPath = null;
+        }
+    }
+
+    private void MigrateLegacySettingKeys(IList<Setting> settings)
+    {
+        foreach (var (legacyKey, currentKey) in LegacySettingKeys)
+        {
+            var legacySetting = settings.FirstOrDefault(setting => setting.SettingId == legacyKey);
+
+            if (legacySetting == null)
+            {
+                continue;
+            }
+
+            if (settings.All(setting => setting.SettingId != currentKey))
+            {
+                var currentSetting = new Setting
+                {
+                    SettingId = currentKey,
+                    Value = legacySetting.Value
+                };
+                dataContext.Settings.Add(currentSetting);
+                settings.Add(currentSetting);
+            }
+
+            dataContext.Settings.Remove(legacySetting);
+            settings.Remove(legacySetting);
         }
     }
 

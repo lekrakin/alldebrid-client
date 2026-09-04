@@ -1,14 +1,14 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.IO.Abstractions.TestingHelpers;
 using System.Text;
 using System.Text.RegularExpressions;
-using Microsoft.Extensions.Logging;
-using Moq;
 using AdbClient.Data.Data;
 using AdbClient.Data.Models.Data;
 using AdbClient.Data.Models.Internal;
 using AdbClient.Service.Services;
 using AdbClient.Service.Wrappers;
+using Microsoft.Extensions.Logging;
+using Moq;
 using TorrentsService = AdbClient.Service.Services.Torrents;
 
 namespace AdbClient.Service.Test.Services;
@@ -77,12 +77,15 @@ public class TorrentsTest
         var baseDownloadPath = Path.Combine(Path.GetTempPath(), "adb-test-downloads");
         var settings = new DbSettings
         {
-            General = new()
+            Integrations = new()
             {
-                RunOnTorrentCompleteFileName = "/bin/echo",
-                RunOnTorrentCompleteArguments = "%N %L %F %R %D %C %Z %I"
+                CompletionCommand = new()
+                {
+                    ExecutablePath = "/bin/echo",
+                    Arguments = "%N %L %F %R %D %C %Z %I"
+                }
             },
-            Paths = new() { DownloadPath = baseDownloadPath }
+            Storage = new() { DownloadPath = baseDownloadPath }
         };
 
         var mocks = new Mocks();
@@ -141,9 +144,9 @@ public class TorrentsTest
         // Arrange
         var settings = new DbSettings
         {
-            General = new()
+            Integrations = new()
             {
-                RunOnTorrentCompleteFileName = null
+                CompletionCommand = new() { ExecutablePath = null }
             }
         };
 
@@ -152,7 +155,7 @@ public class TorrentsTest
         mocks.TorrentDataMock.Setup(t => t.GetById(torrent.TorrentId)).Returns(Task.FromResult<Torrent?>(torrent));
         mocks.DownloadsMock.Setup(d => d.GetForTorrent(torrent.TorrentId)).ReturnsAsync(downloads);
 
-        var downloadPath = $"{settings.Paths.DownloadPath}/{torrent.Category}";
+        var downloadPath = $"{settings.Storage.DownloadPath}/{torrent.Category}";
         var torrentPath = $"{downloadPath}/{torrent.RdName}";
         var filePath = $"{torrentPath}/{downloads[0].FileName}";
 
@@ -186,11 +189,11 @@ public class TorrentsTest
         var baseDownloadPath = Path.Combine(Path.GetTempPath(), "adb-test-downloads");
         var settings = new DbSettings
         {
-            General = new()
+            Integrations = new()
             {
-                RunOnTorrentCompleteFileName = "/bin/echo"
+                CompletionCommand = new() { ExecutablePath = "/bin/echo" }
             },
-            Paths = new() { DownloadPath = baseDownloadPath }
+            Storage = new() { DownloadPath = baseDownloadPath }
         };
 
         var mocks = new Mocks();
@@ -251,11 +254,11 @@ public class TorrentsTest
         var baseDownloadPath = Path.Combine(Path.GetTempPath(), "adb-test-downloads");
         var settings = new DbSettings
         {
-            General = new()
+            Integrations = new()
             {
-                RunOnTorrentCompleteFileName = "/bin/echo"
+                CompletionCommand = new() { ExecutablePath = "/bin/echo" }
             },
-            Paths = new() { DownloadPath = baseDownloadPath }
+            Storage = new() { DownloadPath = baseDownloadPath }
         };
 
         var mocks = new Mocks();

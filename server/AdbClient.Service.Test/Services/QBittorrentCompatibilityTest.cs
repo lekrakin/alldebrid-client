@@ -22,13 +22,13 @@ public class QBittorrentCompatibilityTest
     [Fact]
     public async Task GetTorrents_MapsLogposeFieldsAndFiltersCategory()
     {
-        var originalMappedPath = Settings.Get.Paths.MappedPath;
-        var originalDownloadPath = Settings.Get.Paths.DownloadPath;
+        var originalMappedPath = Settings.Get.Integrations.ReportedDownloadPath;
+        var originalDownloadPath = Settings.Get.Storage.DownloadPath;
 
         try
         {
-            Settings.Get.Paths.MappedPath = "/media/downloads";
-            Settings.Get.Paths.DownloadPath = @"D:\Downloads";
+            Settings.Get.Integrations.ReportedDownloadPath = "/media/downloads";
+            Settings.Get.Storage.DownloadPath = @"D:\Downloads";
 
             var torrent = new Torrent
             {
@@ -81,8 +81,8 @@ public class QBittorrentCompatibilityTest
         }
         finally
         {
-            Settings.Get.Paths.MappedPath = originalMappedPath;
-            Settings.Get.Paths.DownloadPath = originalDownloadPath;
+            Settings.Get.Integrations.ReportedDownloadPath = originalMappedPath;
+            Settings.Get.Storage.DownloadPath = originalDownloadPath;
         }
     }
 
@@ -127,11 +127,11 @@ public class QBittorrentCompatibilityTest
     [InlineData("release.RAR")]
     public async Task GetTorrents_ReportsJobDirectoryForSingleArchive(string fileName)
     {
-        var originalMappedPath = Settings.Get.Paths.MappedPath;
+        var originalMappedPath = Settings.Get.Integrations.ReportedDownloadPath;
 
         try
         {
-            Settings.Get.Paths.MappedPath = "/media/downloads";
+            Settings.Get.Integrations.ReportedDownloadPath = "/media/downloads";
             var torrent = new Torrent
             {
                 TorrentId = Guid.NewGuid(),
@@ -161,18 +161,18 @@ public class QBittorrentCompatibilityTest
         }
         finally
         {
-            Settings.Get.Paths.MappedPath = originalMappedPath;
+            Settings.Get.Integrations.ReportedDownloadPath = originalMappedPath;
         }
     }
 
     [Fact]
     public async Task GetTorrents_FallsBackToJobDirectoryWhenSingleDownloadHasNoFileName()
     {
-        var originalMappedPath = Settings.Get.Paths.MappedPath;
+        var originalMappedPath = Settings.Get.Integrations.ReportedDownloadPath;
 
         try
         {
-            Settings.Get.Paths.MappedPath = "/media/downloads";
+            Settings.Get.Integrations.ReportedDownloadPath = "/media/downloads";
             var torrent = new Torrent
             {
                 TorrentId = Guid.NewGuid(),
@@ -194,7 +194,7 @@ public class QBittorrentCompatibilityTest
         }
         finally
         {
-            Settings.Get.Paths.MappedPath = originalMappedPath;
+            Settings.Get.Integrations.ReportedDownloadPath = originalMappedPath;
         }
     }
 
@@ -224,8 +224,8 @@ public class QBittorrentCompatibilityTest
     public async Task AddMagnet_UsesExposedDownloadDefaults()
     {
         const string magnet = "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=One%20Pace";
-        var originalDefaults = Settings.Get.DownloadClient.Default;
-        Settings.Get.DownloadClient.Default = new DbSettingsDefaultsWithCategory
+        var originalDefaults = Settings.Get.Downloads.Defaults;
+        Settings.Get.Downloads.Defaults = new DbSettingsTorrentDefaults
         {
             Category = "from-defaults",
             OnlyDownloadAvailableFiles = true,
@@ -292,7 +292,7 @@ public class QBittorrentCompatibilityTest
         }
         finally
         {
-            Settings.Get.DownloadClient.Default = originalDefaults;
+            Settings.Get.Downloads.Defaults = originalDefaults;
         }
     }
 
@@ -479,7 +479,7 @@ public class QBittorrentCompatibilityTest
     {
         const string hash = "0123456789abcdef0123456789abcdef01234567";
         const string magnet = $"magnet:?xt=urn:btih:{hash}";
-        var originalDefaultCategory = Settings.Get.DownloadClient.Default.Category;
+        var originalDefaultCategory = Settings.Get.Downloads.Defaults.Category;
         var existingTorrent = new Torrent
         {
             TorrentId = Guid.NewGuid(),
@@ -497,13 +497,13 @@ public class QBittorrentCompatibilityTest
 
         try
         {
-            Settings.Get.DownloadClient.Default.Category = null;
+            Settings.Get.Downloads.Defaults.Category = null;
 
             await compatibility.Add(magnet, null);
         }
         finally
         {
-            Settings.Get.DownloadClient.Default.Category = originalDefaultCategory;
+            Settings.Get.Downloads.Defaults.Category = originalDefaultCategory;
         }
 
         torrentData.Verify(data => data.UpdateCategory(It.IsAny<Guid>(), It.IsAny<string?>()), Times.Never);
@@ -656,8 +656,8 @@ public class QBittorrentCompatibilityTest
     {
         var torrentBytes = Encoding.Latin1.GetBytes(
             "d4:infod6:lengthi1e4:name11:episode.mkv12:piece lengthi16384e6:pieces20:00000000000000000000ee");
-        var originalDefaults = Settings.Get.DownloadClient.Default;
-        Settings.Get.DownloadClient.Default = new DbSettingsDefaultsWithCategory
+        var originalDefaults = Settings.Get.Downloads.Defaults;
+        Settings.Get.Downloads.Defaults = new DbSettingsTorrentDefaults
         {
             Category = "default",
             OnlyDownloadAvailableFiles = false,
@@ -711,7 +711,7 @@ public class QBittorrentCompatibilityTest
         }
         finally
         {
-            Settings.Get.DownloadClient.Default = originalDefaults;
+            Settings.Get.Downloads.Defaults = originalDefaults;
         }
     }
 
@@ -740,13 +740,13 @@ public class QBittorrentCompatibilityTest
     [Fact]
     public async Task PreferencesAndCategories_UseMappedDownloadPaths()
     {
-        var originalMappedPath = Settings.Get.Paths.MappedPath;
-        var originalCategories = Settings.Get.General.Categories;
+        var originalMappedPath = Settings.Get.Integrations.ReportedDownloadPath;
+        var originalCategories = Settings.Get.Integrations.Categories;
 
         try
         {
-            Settings.Get.Paths.MappedPath = "/media/downloads";
-            Settings.Get.General.Categories = "radarr,sonarr";
+            Settings.Get.Integrations.ReportedDownloadPath = "/media/downloads";
+            Settings.Get.Integrations.Categories = "radarr,sonarr";
             var torrentData = new Mock<ITorrentData>();
             torrentData.Setup(data => data.Get()).ReturnsAsync(
             [
@@ -772,8 +772,8 @@ public class QBittorrentCompatibilityTest
         }
         finally
         {
-            Settings.Get.Paths.MappedPath = originalMappedPath;
-            Settings.Get.General.Categories = originalCategories;
+            Settings.Get.Integrations.ReportedDownloadPath = originalMappedPath;
+            Settings.Get.Integrations.Categories = originalCategories;
         }
     }
 
@@ -785,13 +785,13 @@ public class QBittorrentCompatibilityTest
         string expectedRoot,
         string expectedCategoryPath)
     {
-        var originalMappedPath = Settings.Get.Paths.MappedPath;
-        var originalCategories = Settings.Get.General.Categories;
+        var originalMappedPath = Settings.Get.Integrations.ReportedDownloadPath;
+        var originalCategories = Settings.Get.Integrations.Categories;
 
         try
         {
-            Settings.Get.Paths.MappedPath = mappedPath;
-            Settings.Get.General.Categories = "radarr";
+            Settings.Get.Integrations.ReportedDownloadPath = mappedPath;
+            Settings.Get.Integrations.Categories = "radarr";
             var torrentData = new Mock<ITorrentData>();
             torrentData.Setup(data => data.Get()).ReturnsAsync([]);
             var compatibility = CreateCompatibility(torrentData: torrentData);
@@ -801,19 +801,19 @@ public class QBittorrentCompatibilityTest
         }
         finally
         {
-            Settings.Get.Paths.MappedPath = originalMappedPath;
-            Settings.Get.General.Categories = originalCategories;
+            Settings.Get.Integrations.ReportedDownloadPath = originalMappedPath;
+            Settings.Get.Integrations.Categories = originalCategories;
         }
     }
 
     [Fact]
     public async Task PropertiesAndFiles_DescribeTheDownloadedPayload()
     {
-        var originalMappedPath = Settings.Get.Paths.MappedPath;
+        var originalMappedPath = Settings.Get.Integrations.ReportedDownloadPath;
 
         try
         {
-            Settings.Get.Paths.MappedPath = "/media/downloads";
+            Settings.Get.Integrations.ReportedDownloadPath = "/media/downloads";
             var torrent = new Torrent
             {
                 TorrentId = Guid.NewGuid(),
@@ -853,7 +853,7 @@ public class QBittorrentCompatibilityTest
         }
         finally
         {
-            Settings.Get.Paths.MappedPath = originalMappedPath;
+            Settings.Get.Integrations.ReportedDownloadPath = originalMappedPath;
         }
     }
 
@@ -944,7 +944,7 @@ public class QBittorrentCompatibilityTest
     [Fact]
     public async Task CreateCategory_PersistsNewCategoryAndRequestedCasing()
     {
-        var originalCategories = Settings.Get.General.Categories;
+        var originalCategories = Settings.Get.Integrations.Categories;
 
         try
         {
@@ -959,7 +959,7 @@ public class QBittorrentCompatibilityTest
             await dataContext.Database.EnsureCreatedAsync();
             dataContext.Settings.Add(new Setting
             {
-                SettingId = "General:Categories",
+                SettingId = "Integrations:Categories",
                 Value = "movies,logpose"
             });
             await dataContext.SaveChangesAsync();
@@ -973,12 +973,12 @@ public class QBittorrentCompatibilityTest
             await compatibility.CreateCategory("anime");
 
             var stored = await dataContext.Settings.AsNoTracking()
-                                          .SingleAsync(setting => setting.SettingId == "General:Categories");
+                                          .SingleAsync(setting => setting.SettingId == "Integrations:Categories");
             Assert.Equal("movies,LOGPOSE,anime", stored.Value);
         }
         finally
         {
-            Settings.Get.General.Categories = originalCategories;
+            Settings.Get.Integrations.Categories = originalCategories;
         }
     }
 
@@ -1043,7 +1043,7 @@ public class QBittorrentCompatibilityTest
     [Fact]
     public async Task DeleteWithFiles_RemovesSafeJobDirectoryAndPreservesRoots()
     {
-        var originalDownloadPath = Settings.Get.Paths.DownloadPath;
+        var originalDownloadPath = Settings.Get.Storage.DownloadPath;
         var downloadRoot = GetTestDownloadRoot();
         var categoryRoot = Path.Combine(downloadRoot, "radarr");
         var jobDirectory = Path.Combine(categoryRoot, "Movie");
@@ -1052,7 +1052,7 @@ public class QBittorrentCompatibilityTest
 
         try
         {
-            Settings.Get.Paths.DownloadPath = downloadRoot;
+            Settings.Get.Storage.DownloadPath = downloadRoot;
             var torrent = CreateDeletionTorrent("Movie", "movie.mkv");
             torrent.Category = "radarr";
             torrent.FinishedAction = TorrentFinishedAction.RemoveAllTorrents;
@@ -1068,14 +1068,14 @@ public class QBittorrentCompatibilityTest
         }
         finally
         {
-            Settings.Get.Paths.DownloadPath = originalDownloadPath;
+            Settings.Get.Storage.DownloadPath = originalDownloadPath;
         }
     }
 
     [Fact]
     public async Task DeleteWithFiles_RejectsCategoryOutsideDownloadRootBeforeMutation()
     {
-        var originalDownloadPath = Settings.Get.Paths.DownloadPath;
+        var originalDownloadPath = Settings.Get.Storage.DownloadPath;
         var downloadRoot = GetTestDownloadRoot();
         var outsideDirectory = Path.GetFullPath(Path.Combine(downloadRoot, "..", "outside-category", "Movie"));
         var fileSystem = new MockFileSystem();
@@ -1083,7 +1083,7 @@ public class QBittorrentCompatibilityTest
 
         try
         {
-            Settings.Get.Paths.DownloadPath = downloadRoot;
+            Settings.Get.Storage.DownloadPath = downloadRoot;
             var torrent = CreateDeletionTorrent("Movie", "movie.mkv");
             torrent.Category = "../outside-category";
             torrent.FinishedAction = TorrentFinishedAction.RemoveAllTorrents;
@@ -1102,7 +1102,7 @@ public class QBittorrentCompatibilityTest
         }
         finally
         {
-            Settings.Get.Paths.DownloadPath = originalDownloadPath;
+            Settings.Get.Storage.DownloadPath = originalDownloadPath;
         }
     }
 
@@ -1112,7 +1112,7 @@ public class QBittorrentCompatibilityTest
     [InlineData("download")]
     public async Task DeleteWithFiles_RejectsReparsePointBeforeMutation(string reparseLocation)
     {
-        var originalDownloadPath = Settings.Get.Paths.DownloadPath;
+        var originalDownloadPath = Settings.Get.Storage.DownloadPath;
         var downloadRoot = GetTestDownloadRoot();
         var categoryRoot = Path.Combine(downloadRoot, "radarr");
         var jobDirectory = Path.Combine(categoryRoot, "Movie");
@@ -1131,7 +1131,7 @@ public class QBittorrentCompatibilityTest
 
         try
         {
-            Settings.Get.Paths.DownloadPath = downloadRoot;
+            Settings.Get.Storage.DownloadPath = downloadRoot;
             var torrent = CreateDeletionTorrent("Movie", "movie.mkv");
             torrent.Category = "radarr";
             torrent.FinishedAction = TorrentFinishedAction.RemoveAllTorrents;
@@ -1145,7 +1145,7 @@ public class QBittorrentCompatibilityTest
         }
         finally
         {
-            Settings.Get.Paths.DownloadPath = originalDownloadPath;
+            Settings.Get.Storage.DownloadPath = originalDownloadPath;
         }
     }
 
@@ -1153,7 +1153,7 @@ public class QBittorrentCompatibilityTest
     public async Task DeleteWithoutFiles_RemovesEmptySingleFileJobDirectoryAndPreservesRoots()
     {
         const string jobName = "[One Pace][303] Long Ring Long Land 00 [1080p][E85B9E9D].mkv";
-        var originalDownloadPath = Settings.Get.Paths.DownloadPath;
+        var originalDownloadPath = Settings.Get.Storage.DownloadPath;
         var downloadRoot = GetTestDownloadRoot();
         var categoryRoot = Path.Combine(downloadRoot, "logpose");
         var jobDirectory = Path.Combine(categoryRoot, jobName);
@@ -1162,7 +1162,7 @@ public class QBittorrentCompatibilityTest
 
         try
         {
-            Settings.Get.Paths.DownloadPath = downloadRoot;
+            Settings.Get.Storage.DownloadPath = downloadRoot;
             var torrent = CreateDeletionTorrent(jobName, jobName);
             var torrentData = CreateTorrentDataForDelete(torrent);
             var compatibility = CreateCompatibility(torrentData: torrentData, fileSystem: fileSystem);
@@ -1175,7 +1175,7 @@ public class QBittorrentCompatibilityTest
         }
         finally
         {
-            Settings.Get.Paths.DownloadPath = originalDownloadPath;
+            Settings.Get.Storage.DownloadPath = originalDownloadPath;
         }
     }
 
@@ -1185,7 +1185,7 @@ public class QBittorrentCompatibilityTest
         const string packName = "[One Pace][106-114] Whiskey Peak [480p]";
         const string firstFile = "[One Pace][106-109] Whiskey Peak 01 [480p][AAAAAAAA].mkv";
         const string secondFile = "[One Pace][110-114] Whiskey Peak 02 [480p][BBBBBBBB].mkv";
-        var originalDownloadPath = Settings.Get.Paths.DownloadPath;
+        var originalDownloadPath = Settings.Get.Storage.DownloadPath;
         var downloadRoot = GetTestDownloadRoot();
         var categoryRoot = Path.Combine(downloadRoot, "logpose");
         var jobDirectory = Path.Combine(categoryRoot, packName);
@@ -1195,7 +1195,7 @@ public class QBittorrentCompatibilityTest
 
         try
         {
-            Settings.Get.Paths.DownloadPath = downloadRoot;
+            Settings.Get.Storage.DownloadPath = downloadRoot;
             var torrent = CreateDeletionTorrent(packName, firstFile);
             torrent.Downloads.Add(new()
             {
@@ -1222,7 +1222,7 @@ public class QBittorrentCompatibilityTest
         }
         finally
         {
-            Settings.Get.Paths.DownloadPath = originalDownloadPath;
+            Settings.Get.Storage.DownloadPath = originalDownloadPath;
         }
     }
 
@@ -1230,7 +1230,7 @@ public class QBittorrentCompatibilityTest
     public async Task DeleteWithoutFiles_PreservesNonEmptyJobDirectory()
     {
         const string jobName = "One Pace Episode 01";
-        var originalDownloadPath = Settings.Get.Paths.DownloadPath;
+        var originalDownloadPath = Settings.Get.Storage.DownloadPath;
         var downloadRoot = GetTestDownloadRoot();
         var jobDirectory = Path.Combine(downloadRoot, "logpose", jobName);
         var retainedFile = Path.Combine(jobDirectory, "keep.mkv");
@@ -1239,7 +1239,7 @@ public class QBittorrentCompatibilityTest
 
         try
         {
-            Settings.Get.Paths.DownloadPath = downloadRoot;
+            Settings.Get.Storage.DownloadPath = downloadRoot;
             var torrent = CreateDeletionTorrent(jobName, "episode.mkv");
             var torrentData = CreateTorrentDataForDelete(torrent);
             var compatibility = CreateCompatibility(torrentData: torrentData, fileSystem: fileSystem);
@@ -1251,14 +1251,14 @@ public class QBittorrentCompatibilityTest
         }
         finally
         {
-            Settings.Get.Paths.DownloadPath = originalDownloadPath;
+            Settings.Get.Storage.DownloadPath = originalDownloadPath;
         }
     }
 
     [Fact]
     public async Task DeleteWithoutFiles_PreservesDirectoryOutsideCategoryRoot()
     {
-        var originalDownloadPath = Settings.Get.Paths.DownloadPath;
+        var originalDownloadPath = Settings.Get.Storage.DownloadPath;
         var downloadRoot = GetTestDownloadRoot();
         var categoryRoot = Path.Combine(downloadRoot, "logpose");
         var outsideDirectory = Path.Combine(downloadRoot, "outside-job");
@@ -1268,7 +1268,7 @@ public class QBittorrentCompatibilityTest
 
         try
         {
-            Settings.Get.Paths.DownloadPath = downloadRoot;
+            Settings.Get.Storage.DownloadPath = downloadRoot;
             var torrent = CreateDeletionTorrent(Path.Combine("..", "outside-job"), "episode.mkv");
             var torrentData = CreateTorrentDataForDelete(torrent);
             var compatibility = CreateCompatibility(torrentData: torrentData, fileSystem: fileSystem);
@@ -1283,7 +1283,7 @@ public class QBittorrentCompatibilityTest
         }
         finally
         {
-            Settings.Get.Paths.DownloadPath = originalDownloadPath;
+            Settings.Get.Storage.DownloadPath = originalDownloadPath;
         }
     }
 
@@ -1293,7 +1293,7 @@ public class QBittorrentCompatibilityTest
         const string jobName = "One Pace Episode 01";
         const string siblingName = "other-job";
         const string fileName = "episode.mkv";
-        var originalDownloadPath = Settings.Get.Paths.DownloadPath;
+        var originalDownloadPath = Settings.Get.Storage.DownloadPath;
         var downloadRoot = GetTestDownloadRoot();
         var categoryRoot = Path.Combine(downloadRoot, "logpose");
         var jobDirectory = Path.Combine(categoryRoot, jobName);
@@ -1304,7 +1304,7 @@ public class QBittorrentCompatibilityTest
 
         try
         {
-            Settings.Get.Paths.DownloadPath = downloadRoot;
+            Settings.Get.Storage.DownloadPath = downloadRoot;
             var torrent = CreateDeletionTorrent(jobName, fileName);
             torrent.RdFiles = JsonSerializer.Serialize(new[]
             {
@@ -1322,7 +1322,7 @@ public class QBittorrentCompatibilityTest
         }
         finally
         {
-            Settings.Get.Paths.DownloadPath = originalDownloadPath;
+            Settings.Get.Storage.DownloadPath = originalDownloadPath;
         }
     }
 
@@ -1333,7 +1333,7 @@ public class QBittorrentCompatibilityTest
     public async Task DeleteWithoutFiles_PreservesJobWhenPathContainsReparsePoint(string reparseLocation)
     {
         const string jobName = "One Pace Episode 01";
-        var originalDownloadPath = Settings.Get.Paths.DownloadPath;
+        var originalDownloadPath = Settings.Get.Storage.DownloadPath;
         var downloadRoot = GetTestDownloadRoot();
         var categoryRoot = Path.Combine(downloadRoot, "logpose");
         var jobDirectory = Path.Combine(categoryRoot, jobName);
@@ -1352,7 +1352,7 @@ public class QBittorrentCompatibilityTest
 
         try
         {
-            Settings.Get.Paths.DownloadPath = downloadRoot;
+            Settings.Get.Storage.DownloadPath = downloadRoot;
             var torrent = CreateDeletionTorrent(jobName, "episode.mkv");
             var torrentData = CreateTorrentDataForDelete(torrent);
             var compatibility = CreateCompatibility(torrentData: torrentData, fileSystem: fileSystem);
@@ -1363,7 +1363,7 @@ public class QBittorrentCompatibilityTest
         }
         finally
         {
-            Settings.Get.Paths.DownloadPath = originalDownloadPath;
+            Settings.Get.Storage.DownloadPath = originalDownloadPath;
         }
     }
 
@@ -1371,7 +1371,7 @@ public class QBittorrentCompatibilityTest
     public async Task DeleteWithoutFiles_WithoutLogposeCategoryRemovesRecordAndPreservesDownloadRoot()
     {
         const string jobName = "One Pace Episode 01";
-        var originalDownloadPath = Settings.Get.Paths.DownloadPath;
+        var originalDownloadPath = Settings.Get.Storage.DownloadPath;
         var downloadRoot = GetTestDownloadRoot();
         var jobDirectory = Path.Combine(downloadRoot, jobName);
         var fileSystem = new MockFileSystem();
@@ -1379,7 +1379,7 @@ public class QBittorrentCompatibilityTest
 
         try
         {
-            Settings.Get.Paths.DownloadPath = downloadRoot;
+            Settings.Get.Storage.DownloadPath = downloadRoot;
             var torrent = CreateDeletionTorrent(jobName, "episode.mkv");
             torrent.Category = null;
             torrent.FinishedAction = TorrentFinishedAction.RemoveAllTorrents;
@@ -1394,14 +1394,14 @@ public class QBittorrentCompatibilityTest
         }
         finally
         {
-            Settings.Get.Paths.DownloadPath = originalDownloadPath;
+            Settings.Get.Storage.DownloadPath = originalDownloadPath;
         }
     }
 
     [Fact]
     public async Task DeleteWithFiles_RemovesLocalDataAndRetainsRecordWhenConfiguredActionIsNone()
     {
-        var originalDownloadPath = Settings.Get.Paths.DownloadPath;
+        var originalDownloadPath = Settings.Get.Storage.DownloadPath;
         var downloadRoot = GetTestDownloadRoot();
         var categoryRoot = Path.Combine(downloadRoot, "radarr");
         var jobDirectory = Path.Combine(categoryRoot, "Movie");
@@ -1410,7 +1410,7 @@ public class QBittorrentCompatibilityTest
 
         try
         {
-            Settings.Get.Paths.DownloadPath = downloadRoot;
+            Settings.Get.Storage.DownloadPath = downloadRoot;
             var torrent = CreateDeletionTorrent("Movie", "movie.mkv");
             torrent.Category = "radarr";
             torrent.FinishedAction = TorrentFinishedAction.None;
@@ -1444,14 +1444,14 @@ public class QBittorrentCompatibilityTest
         }
         finally
         {
-            Settings.Get.Paths.DownloadPath = originalDownloadPath;
+            Settings.Get.Storage.DownloadPath = originalDownloadPath;
         }
     }
 
     [Fact]
     public async Task DeleteWithoutFiles_RetainsLocalDataAndRecordWhenConfiguredActionIsNone()
     {
-        var originalDownloadPath = Settings.Get.Paths.DownloadPath;
+        var originalDownloadPath = Settings.Get.Storage.DownloadPath;
         var downloadRoot = GetTestDownloadRoot();
         var jobDirectory = Path.Combine(downloadRoot, "radarr", "Movie");
         var retainedFile = Path.Combine(jobDirectory, "movie.mkv");
@@ -1460,7 +1460,7 @@ public class QBittorrentCompatibilityTest
 
         try
         {
-            Settings.Get.Paths.DownloadPath = downloadRoot;
+            Settings.Get.Storage.DownloadPath = downloadRoot;
             var torrent = CreateDeletionTorrent("Movie", "movie.mkv");
             torrent.Category = "radarr";
             torrent.FinishedAction = TorrentFinishedAction.None;
@@ -1484,14 +1484,14 @@ public class QBittorrentCompatibilityTest
         }
         finally
         {
-            Settings.Get.Paths.DownloadPath = originalDownloadPath;
+            Settings.Get.Storage.DownloadPath = originalDownloadPath;
         }
     }
 
     [Fact]
     public async Task DeleteWithFiles_RetryIsIdempotentForRetainedRecord()
     {
-        var originalDownloadPath = Settings.Get.Paths.DownloadPath;
+        var originalDownloadPath = Settings.Get.Storage.DownloadPath;
         var downloadRoot = GetTestDownloadRoot();
         var jobDirectory = Path.Combine(downloadRoot, "sonarr", "Episode");
         var fileSystem = new MockFileSystem();
@@ -1499,7 +1499,7 @@ public class QBittorrentCompatibilityTest
 
         try
         {
-            Settings.Get.Paths.DownloadPath = downloadRoot;
+            Settings.Get.Storage.DownloadPath = downloadRoot;
             var torrent = CreateDeletionTorrent("Episode", "episode.mkv");
             torrent.Category = "sonarr";
             torrent.FinishedAction = TorrentFinishedAction.None;
@@ -1519,7 +1519,7 @@ public class QBittorrentCompatibilityTest
         }
         finally
         {
-            Settings.Get.Paths.DownloadPath = originalDownloadPath;
+            Settings.Get.Storage.DownloadPath = originalDownloadPath;
         }
     }
 
@@ -1538,7 +1538,7 @@ public class QBittorrentCompatibilityTest
     public async Task DeleteWithoutFiles_RetryIsIdempotentForRetainedLogposeRecord()
     {
         const string jobName = "One Pace Episode 01";
-        var originalDownloadPath = Settings.Get.Paths.DownloadPath;
+        var originalDownloadPath = Settings.Get.Storage.DownloadPath;
         var downloadRoot = GetTestDownloadRoot();
         var jobDirectory = Path.Combine(downloadRoot, "logpose", jobName);
         var fileSystem = new MockFileSystem();
@@ -1546,7 +1546,7 @@ public class QBittorrentCompatibilityTest
 
         try
         {
-            Settings.Get.Paths.DownloadPath = downloadRoot;
+            Settings.Get.Storage.DownloadPath = downloadRoot;
             var torrent = CreateDeletionTorrent(jobName, "episode.mkv");
             var torrentData = new Mock<ITorrentData>();
             torrentData.Setup(data => data.GetByHash(torrent.Hash)).ReturnsAsync(torrent);
@@ -1565,7 +1565,7 @@ public class QBittorrentCompatibilityTest
         }
         finally
         {
-            Settings.Get.Paths.DownloadPath = originalDownloadPath;
+            Settings.Get.Storage.DownloadPath = originalDownloadPath;
         }
     }
 

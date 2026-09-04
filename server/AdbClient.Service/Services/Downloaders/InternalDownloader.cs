@@ -45,7 +45,7 @@ public class InternalDownloader : IDownloader
             uri,
             filePath,
             CreateDownloadConfiguration(
-                Settings.Get.DownloadClient,
+                Settings.Get.Downloads,
                 TorrentRunner.ActiveDownloadClients.Count),
             true)
     {
@@ -187,15 +187,15 @@ public class InternalDownloader : IDownloader
     }
 
     internal static DownloadConfiguration CreateDownloadConfiguration(
-        DbSettingsDownloadClient settings,
+        DbSettingsDownloads settings,
         int activeDownloadCount)
     {
         var chunkCount = Math.Clamp(
-            settings.ParallelChunkCount > 0 ? settings.ParallelChunkCount : DefaultChunkCount,
+            settings.ChunksPerFile > 0 ? settings.ChunksPerFile : DefaultChunkCount,
             1,
             MaximumChunkCount);
         var parallelCount = Math.Min(
-            Math.Clamp(settings.ParallelCount, 1, MaximumParallelConnections),
+            Math.Clamp(settings.ConnectionsPerFile, 1, MaximumParallelConnections),
             chunkCount);
         var configuration = new DownloadConfiguration
         {
@@ -221,7 +221,7 @@ public class InternalDownloader : IDownloader
             }
         };
 
-        ApplySpeedLimit(configuration, settings.MaxSpeed, activeDownloadCount);
+        ApplySpeedLimit(configuration, settings.SpeedLimit, activeDownloadCount);
 
         return configuration;
     }
@@ -409,7 +409,7 @@ public class InternalDownloader : IDownloader
             {
                 ApplySpeedLimit(
                     _downloadConfiguration,
-                    Settings.Get.DownloadClient.MaxSpeed,
+                    Settings.Get.Downloads.SpeedLimit,
                     TorrentRunner.ActiveDownloadClients.Count);
             }
         }

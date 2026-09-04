@@ -1,6 +1,6 @@
-﻿using Microsoft.Extensions.Caching.Memory;
-using Microsoft.Extensions.Logging;
 using System.Reflection;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging;
 
 namespace AdbClient.Service.Services;
 
@@ -14,7 +14,7 @@ public class TrackerListGrabber(IHttpClientFactory httpClientFactory, IMemoryCac
 
     public async Task<string[]> GetTrackers()
     {
-        var trackerUrlList = Settings.Get.General.TrackerEnrichmentList;
+        var trackerUrlList = Settings.Get.Provider.TrackerEnrichmentList;
 
         if (string.IsNullOrWhiteSpace(trackerUrlList))
         {
@@ -29,7 +29,7 @@ public class TrackerListGrabber(IHttpClientFactory httpClientFactory, IMemoryCac
             return [];
         }
 
-        var currentExpiration = Settings.Get.General.TrackerEnrichmentCacheExpiration;
+        var currentExpiration = Settings.Get.Provider.TrackerEnrichmentCacheExpiration;
         var useCache = currentExpiration > 0;
 
         if (!useCache)

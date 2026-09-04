@@ -39,7 +39,7 @@ public sealed class QBittorrentCompatibility(
 
     public async Task<IReadOnlyDictionary<string, QBittorrentCategory>> GetCategories()
     {
-        var configuredCategories = (Settings.Get.General.Categories ?? string.Empty)
+        var configuredCategories = (Settings.Get.Integrations.Categories ?? string.Empty)
                                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         var assignedCategories = (await torrents.Get())
                                 .Select(torrent => torrent.Category)
@@ -63,7 +63,7 @@ public sealed class QBittorrentCompatibility(
         category = NormalizeCategory(category)
                    ?? throw new ArgumentException("Category cannot be empty.", nameof(category));
 
-        var categories = (Settings.Get.General.Categories ?? string.Empty)
+        var categories = (Settings.Get.Integrations.Categories ?? string.Empty)
                          .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                          .Distinct(StringComparer.OrdinalIgnoreCase)
                          .ToList();
@@ -74,12 +74,12 @@ public sealed class QBittorrentCompatibility(
         if (existingIndex < 0)
         {
             categories.Add(category);
-            await settings.Update("General:Categories", string.Join(',', categories));
+            await settings.Update("Integrations:Categories", string.Join(',', categories));
         }
         else if (!categories[existingIndex].Equals(category, StringComparison.Ordinal))
         {
             categories[existingIndex] = category;
-            await settings.Update("General:Categories", string.Join(',', categories));
+            await settings.Update("Integrations:Categories", string.Join(',', categories));
         }
     }
 
@@ -362,7 +362,7 @@ public sealed class QBittorrentCompatibility(
             return null;
         }
 
-        var downloadRoot = FileSystemPath.Normalize(Settings.Get.Paths.DownloadPath);
+        var downloadRoot = FileSystemPath.Normalize(Settings.Get.Storage.DownloadPath);
         var categoryPath = FileSystemPath.Normalize(Path.Combine(
             downloadRoot,
             normalized.Replace('/', Path.DirectorySeparatorChar)));
@@ -398,7 +398,7 @@ public sealed class QBittorrentCompatibility(
         Torrent torrent,
         string? categoryOverride = null)
     {
-        if (string.IsNullOrWhiteSpace(Settings.Get.Paths.DownloadPath) ||
+        if (string.IsNullOrWhiteSpace(Settings.Get.Storage.DownloadPath) ||
             string.IsNullOrWhiteSpace(torrent.RdName))
         {
             return null;
@@ -406,7 +406,7 @@ public sealed class QBittorrentCompatibility(
 
         try
         {
-            var downloadRoot = FileSystemPath.Normalize(Settings.Get.Paths.DownloadPath);
+            var downloadRoot = FileSystemPath.Normalize(Settings.Get.Storage.DownloadPath);
             var cleanupCategory = categoryOverride ?? torrent.Category;
             var categoryRoot = string.IsNullOrWhiteSpace(cleanupCategory)
                 ? downloadRoot
@@ -548,7 +548,7 @@ public sealed class QBittorrentCompatibility(
 
     private static Torrent CreateTorrent(string? category)
     {
-        var defaults = Settings.Get.DownloadClient.Default;
+        var defaults = Settings.Get.Downloads.Defaults;
         var normalizedCategory = NormalizeCategory(
             string.IsNullOrWhiteSpace(category) ? defaults.Category : category);
 
@@ -657,9 +657,9 @@ public sealed class QBittorrentCompatibility(
 
     private static string GetSavePath(string? category)
     {
-        var mappedPath = string.IsNullOrWhiteSpace(Settings.Get.Paths.MappedPath)
-            ? Settings.Get.Paths.DownloadPath
-            : Settings.Get.Paths.MappedPath;
+        var mappedPath = string.IsNullOrWhiteSpace(Settings.Get.Integrations.ReportedDownloadPath)
+            ? Settings.Get.Storage.DownloadPath
+            : Settings.Get.Integrations.ReportedDownloadPath;
 
         return CombineMappedPath(mappedPath, category);
     }

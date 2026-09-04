@@ -15,10 +15,10 @@ public class SettingDataTest
     {
         var settings = SettingData.GetAll().ToDictionary(setting => setting.Key);
 
-        Assert.Equal(1, settings["General:DownloadLimit"].Minimum);
-        Assert.Equal(16, settings["DownloadClient:ParallelCount"].Maximum);
+        Assert.Equal(1, settings["Downloads:ConcurrentFiles"].Minimum);
+        Assert.Equal(16, settings["Downloads:ConnectionsPerFile"].Maximum);
         Assert.True(settings["Provider:ApiKey"].IsSecret);
-        Assert.False(settings["Paths:DownloadPath"].IsSecret);
+        Assert.False(settings["Storage:DownloadPath"].IsSecret);
     }
 
     [Fact]
@@ -44,8 +44,106 @@ public class SettingDataTest
                 "downloads")
             : "/data/downloads";
 
-        Assert.Equal(expectedDownloadPath, settings["Paths:DownloadPath"].Value);
-        Assert.Null(settings["Paths:MappedPath"].Value);
+        Assert.Equal(expectedDownloadPath, settings["Storage:DownloadPath"].Value);
+        Assert.Null(settings["Integrations:ReportedDownloadPath"].Value);
+
+    }
+
+    [Fact]
+    public async Task Seed_MigratesLegacySettingKeysWithoutLosingValues()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<DataContext>()
+                     .UseSqlite(connection)
+                     .Options;
+        await using var dataContext = new DataContext(options);
+        await dataContext.Database.EnsureCreatedAsync();
+
+        (string LegacyKey, string CurrentKey, string Value)[] migrations =
+        [
+            ("General:DownloadLimit", "Downloads:ConcurrentFiles", "4"),
+            ("General:UnpackLimit", "Downloads:ConcurrentExtractions", "2"),
+            ("General:Categories", "Integrations:Categories", "radarr,sonarr"),
+            ("General:RunOnTorrentCompleteFileName", "Integrations:CompletionCommand:ExecutablePath", @"C:\Tools\finish.exe"),
+            ("General:RunOnTorrentCompleteArguments", "Integrations:CompletionCommand:Arguments", "%N --path %F"),
+            ("General:TrackerEnrichmentList", "Provider:TrackerEnrichmentList", "https://example.com/trackers.txt"),
+            ("General:TrackerEnrichmentCacheExpiration", "Provider:TrackerEnrichmentCacheExpiration", "120"),
+            ("General:BannedTrackers", "Provider:BannedTrackers", "private,internal"),
+            ("DownloadClient:MaxSpeed", "Downloads:SpeedLimit", "25"),
+            ("DownloadClient:ParallelCount", "Downloads:ConnectionsPerFile", "4"),
+            ("DownloadClient:ParallelChunkCount", "Downloads:ChunksPerFile", "16"),
+            ("DownloadClient:AutoImport", "Provider:AutoImport", "True"),
+            ("DownloadClient:AutoDelete", "Provider:AutoDelete", "True"),
+            ("DownloadClient:MaxParallelDownloads", "Provider:ConcurrentTorrents", "3"),
+            ("DownloadClient:Default:HostDownloadAction", "Downloads:Defaults:HostDownloadAction", "0"),
+            ("DownloadClient:Default:Category", "Downloads:Defaults:Category", "radarr"),
+            ("DownloadClient:Default:FinishedAction", "Downloads:Defaults:FinishedAction", "0"),
+            ("DownloadClient:Default:FinishedActionDelay", "Downloads:Defaults:FinishedActionDelay", "15"),
+            ("DownloadClient:Default:OnlyDownloadAvailableFiles", "Downloads:Defaults:OnlyDownloadAvailableFiles", "True"),
+            ("DownloadClient:Default:MinFileSize", "Downloads:Defaults:MinFileSize", "10"),
+            ("DownloadClient:Default:IncludeRegex", "Downloads:Defaults:IncludeRegex", @"\.mkv$"),
+            ("DownloadClient:Default:ExcludeRegex", "Downloads:Defaults:ExcludeRegex", @"\.txt$"),
+            ("DownloadClient:Default:TorrentRetryAttempts", "Downloads:Defaults:TorrentRetryAttempts", "5"),
+            ("DownloadClient:Default:DownloadRetryAttempts", "Downloads:Defaults:DownloadRetryAttempts", "6"),
+            ("DownloadClient:Default:DeleteOnError", "Downloads:Defaults:DeleteOnError", "30"),
+            ("DownloadClient:Default:TorrentLifetime", "Downloads:Defaults:TorrentLifetime", "1440"),
+            ("DownloadClient:Default:Priority", "Downloads:Defaults:Priority", "7"),
+            ("Paths:DownloadPath", "Storage:DownloadPath", "/srv/downloads"),
+            ("Paths:MappedPath", "Integrations:ReportedDownloadPath", "/media/downloads"),
+            ("Paths:CopyAddedTorrents", "Integrations:AddedTorrentCopyPath", "/srv/torrent-copies"),
+            ("Paths:WatchPath", "WatchFolder:InboxPath", "/srv/watch"),
+            ("Paths:WatchErrorPath", "WatchFolder:ErrorPath", "/srv/watch-errors"),
+            ("Paths:WatchProcessedPath", "WatchFolder:ProcessedPath", "/srv/watch-processed"),
+            ("Watch:Interval", "WatchFolder:Interval", "90")
+        ];
+
+        dataContext.Settings.AddRange(migrations.Select(migration => new Setting
+        {
+            SettingId = migration.LegacyKey,
+            Value = migration.Value
+        }));
+        await dataContext.SaveChangesAsync();
+        dataContext.ChangeTracker.Clear();
+
+        var settingData = new SettingData(dataContext, Mock.Of<ILogger<SettingData>>());
+        await settingData.Seed();
+
+        var settings = await dataContext.Settings.AsNoTracking().ToDictionaryAsync(setting => setting.SettingId);
+
+        foreach (var migration in migrations)
+        {
+            Assert.DoesNotContain(migration.LegacyKey, settings.Keys);
+            Assert.Equal(migration.Value, settings[migration.CurrentKey].Value);
+        }
+    }
+
+    [Fact]
+    public async Task Seed_PrefersCurrentSettingWhenLegacyAndCurrentKeysBothExist()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<DataContext>()
+                     .UseSqlite(connection)
+                     .Options;
+        await using var dataContext = new DataContext(options);
+        await dataContext.Database.EnsureCreatedAsync();
+
+        dataContext.Settings.AddRange(
+            new Setting { SettingId = "General:DownloadLimit", Value = "4" },
+            new Setting { SettingId = "Downloads:ConcurrentFiles", Value = "7" });
+        await dataContext.SaveChangesAsync();
+        dataContext.ChangeTracker.Clear();
+
+        var settingData = new SettingData(dataContext, Mock.Of<ILogger<SettingData>>());
+        await settingData.Seed();
+
+        var settings = await dataContext.Settings.AsNoTracking().ToDictionaryAsync(setting => setting.SettingId);
+
+        Assert.DoesNotContain("General:DownloadLimit", settings.Keys);
+        Assert.Equal("7", settings["Downloads:ConcurrentFiles"].Value);
     }
 
     [Fact]
@@ -72,8 +170,10 @@ public class SettingDataTest
 
         var settings = await dataContext.Settings.AsNoTracking().ToDictionaryAsync(setting => setting.SettingId);
 
-        Assert.Equal(downloadPath, settings["Paths:DownloadPath"].Value);
-        Assert.Null(settings["Paths:MappedPath"].Value);
+        Assert.Equal(downloadPath, settings["Storage:DownloadPath"].Value);
+        Assert.Null(settings["Integrations:ReportedDownloadPath"].Value);
+        Assert.DoesNotContain("Paths:DownloadPath", settings.Keys);
+        Assert.DoesNotContain("Paths:MappedPath", settings.Keys);
     }
 
     [Fact]
@@ -104,8 +204,8 @@ public class SettingDataTest
 
         var settings = await dataContext.Settings.AsNoTracking().ToDictionaryAsync(setting => setting.SettingId);
 
-        Assert.Equal("/data/downloads", settings["Paths:DownloadPath"].Value);
-        Assert.Null(settings["Paths:MappedPath"].Value);
+        Assert.Equal("/data/downloads", settings["Storage:DownloadPath"].Value);
+        Assert.Null(settings["Integrations:ReportedDownloadPath"].Value);
     }
 
     [Fact]
@@ -135,7 +235,7 @@ public class SettingDataTest
 
         Assert.DoesNotContain(settings, setting => setting.SettingId == "DownloadClient:ChunkCount");
         Assert.Contains(settings, setting =>
-            setting.SettingId == "DownloadClient:ParallelChunkCount" && setting.Value == "0");
+            setting.SettingId == "Downloads:ChunksPerFile" && setting.Value == "0");
     }
 
     [Fact]
@@ -154,31 +254,31 @@ public class SettingDataTest
         await settingData.Seed();
         await settingData.ResetCache();
 
-        var downloadPath = SettingData.Get.Paths.DownloadPath;
+        var downloadPath = SettingData.Get.Storage.DownloadPath;
         await settingData.Update([
-            new SettingProperty { Key = "General:Categories", Value = " radarr,SONARR,radarr " },
-            new SettingProperty { Key = "General:BannedTrackers", Value = " private,PRIVATE, internal " },
-            new SettingProperty { Key = "Paths:MappedPath", Value = $"{downloadPath}/" },
+            new SettingProperty { Key = "Integrations:Categories", Value = " radarr,SONARR,radarr " },
+            new SettingProperty { Key = "Provider:BannedTrackers", Value = " private,PRIVATE, internal " },
+            new SettingProperty { Key = "Integrations:ReportedDownloadPath", Value = $"{downloadPath}/" },
             new SettingProperty { Key = "Provider:ApiKey", Value = "  secret-token  " }
         ]);
 
-        Assert.Equal("radarr,SONARR", SettingData.Get.General.Categories);
-        Assert.Equal("private,internal", SettingData.Get.General.BannedTrackers);
-        Assert.Null(SettingData.Get.Paths.MappedPath);
+        Assert.Equal("radarr,SONARR", SettingData.Get.Integrations.Categories);
+        Assert.Equal("private,internal", SettingData.Get.Provider.BannedTrackers);
+        Assert.Null(SettingData.Get.Integrations.ReportedDownloadPath);
         Assert.Equal("secret-token", SettingData.Get.Provider.ApiKey);
 
         var persisted = await dataContext.Settings.AsNoTracking().ToDictionaryAsync(setting => setting.SettingId);
-        Assert.Equal("radarr,SONARR", persisted["General:Categories"].Value);
-        Assert.Equal("private,internal", persisted["General:BannedTrackers"].Value);
-        Assert.Null(persisted["Paths:MappedPath"].Value);
+        Assert.Equal("radarr,SONARR", persisted["Integrations:Categories"].Value);
+        Assert.Equal("private,internal", persisted["Provider:BannedTrackers"].Value);
+        Assert.Null(persisted["Integrations:ReportedDownloadPath"].Value);
         Assert.Equal("secret-token", persisted["Provider:ApiKey"].Value);
     }
 
     [Theory]
-    [InlineData("General:DownloadLimit", -1)]
-    [InlineData("DownloadClient:ParallelCount", 17)]
+    [InlineData("Downloads:ConcurrentFiles", -1)]
+    [InlineData("Downloads:ConnectionsPerFile", 17)]
     [InlineData("Provider:CheckInterval", 4)]
-    [InlineData("DownloadClient:Default:TorrentRetryAttempts", 1001)]
+    [InlineData("Downloads:Defaults:TorrentRetryAttempts", 1001)]
     public async Task Update_RejectsOutOfRangeValuesWithoutPersisting(string key, int value)
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
@@ -205,10 +305,10 @@ public class SettingDataTest
     }
 
     [Theory]
-    [InlineData("DownloadClient:Default:IncludeRegex", "[")]
-    [InlineData("General:TrackerEnrichmentList", "file:///trackers.txt")]
-    [InlineData("DownloadClient:Default:Category", "../outside")]
-    [InlineData("General:Categories", "radarr,../outside")]
+    [InlineData("Downloads:Defaults:IncludeRegex", "[")]
+    [InlineData("Provider:TrackerEnrichmentList", "file:///trackers.txt")]
+    [InlineData("Downloads:Defaults:Category", "../outside")]
+    [InlineData("Integrations:Categories", "radarr,../outside")]
     public async Task Update_RejectsValuesThatWouldFailDownstream(string key, string value)
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
@@ -249,8 +349,8 @@ public class SettingDataTest
             settingData.Update([new SettingProperty { Key = "Unknown:Setting", Value = 1 }]));
         await Assert.ThrowsAsync<ArgumentException>(() =>
             settingData.Update([
-                new SettingProperty { Key = "General:DownloadLimit", Value = 2 },
-                new SettingProperty { Key = "General:DownloadLimit", Value = 3 }
+                new SettingProperty { Key = "Downloads:ConcurrentFiles", Value = 2 },
+                new SettingProperty { Key = "Downloads:ConcurrentFiles", Value = 3 }
             ]));
     }
 
@@ -267,9 +367,9 @@ public class SettingDataTest
         await dataContext.Database.EnsureCreatedAsync();
 
         dataContext.Settings.AddRange(
-            new Setting { SettingId = "General:DownloadLimit", Value = "0" },
-            new Setting { SettingId = "DownloadClient:Default:IncludeRegex", Value = "[" },
-            new Setting { SettingId = "General:TrackerEnrichmentList", Value = "not-a-url" });
+            new Setting { SettingId = "Downloads:ConcurrentFiles", Value = "0" },
+            new Setting { SettingId = "Downloads:Defaults:IncludeRegex", Value = "[" },
+            new Setting { SettingId = "Provider:TrackerEnrichmentList", Value = "not-a-url" });
         await dataContext.SaveChangesAsync();
         dataContext.ChangeTracker.Clear();
 
@@ -277,13 +377,13 @@ public class SettingDataTest
         await settingData.Seed();
         await settingData.ResetCache();
 
-        Assert.Equal(2, SettingData.Get.General.DownloadLimit);
-        Assert.Null(SettingData.Get.DownloadClient.Default.IncludeRegex);
-        Assert.Null(SettingData.Get.General.TrackerEnrichmentList);
+        Assert.Equal(2, SettingData.Get.Downloads.ConcurrentFiles);
+        Assert.Null(SettingData.Get.Downloads.Defaults.IncludeRegex);
+        Assert.Null(SettingData.Get.Provider.TrackerEnrichmentList);
 
         var persisted = await dataContext.Settings.AsNoTracking().ToDictionaryAsync(setting => setting.SettingId);
-        Assert.Equal("2", persisted["General:DownloadLimit"].Value);
-        Assert.Null(persisted["DownloadClient:Default:IncludeRegex"].Value);
-        Assert.Null(persisted["General:TrackerEnrichmentList"].Value);
+        Assert.Equal("2", persisted["Downloads:ConcurrentFiles"].Value);
+        Assert.Null(persisted["Downloads:Defaults:IncludeRegex"].Value);
+        Assert.Null(persisted["Provider:TrackerEnrichmentList"].Value);
     }
 }

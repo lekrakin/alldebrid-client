@@ -101,7 +101,7 @@ public class SettingsController(Settings settings, Torrents torrents) : Controll
     [Route("TestDownloadSpeed")]
     public async Task<ActionResult> TestDownloadSpeed(CancellationToken cancellationToken)
     {
-        var downloadPath = Settings.Get.Paths.DownloadPath;
+        var downloadPath = Settings.Get.Storage.DownloadPath;
 
         var testFilePath = Path.Combine(downloadPath, "speed-test.bin");
 
@@ -140,7 +140,7 @@ public class SettingsController(Settings settings, Torrents torrents) : Controll
     [Route("TestWriteSpeed")]
     public async Task<ActionResult> TestWriteSpeed()
     {
-        var downloadPath = Settings.Get.Paths.DownloadPath;
+        var downloadPath = Settings.Get.Storage.DownloadPath;
 
         var testFilePath = Path.Combine(downloadPath, "test.tmp");
 

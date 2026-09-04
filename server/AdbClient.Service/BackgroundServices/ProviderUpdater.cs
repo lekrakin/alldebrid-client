@@ -1,8 +1,8 @@
-﻿using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using AdbClient.Data.Enums;
 using AdbClient.Service.Services;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace AdbClient.Service.BackgroundServices;
 
@@ -19,7 +19,7 @@ public class ProviderUpdater(ILogger<ProviderUpdater> logger, IServiceProvider s
 
         using var scope = serviceProvider.CreateScope();
         var torrentService = scope.ServiceProvider.GetRequiredService<Torrents>();
-            
+
         logger.LogInformation("ProviderUpdater started.");
 
         while (!stoppingToken.IsCancellationRequested)
@@ -28,10 +28,10 @@ public class ProviderUpdater(ILogger<ProviderUpdater> logger, IServiceProvider s
             {
                 var torrents = await torrentService.Get();
 
-                if (_nextUpdate < DateTime.UtcNow && (Settings.Get.DownloadClient.AutoImport || torrents.Any(t => t.RdStatus != TorrentStatus.Finished)))
+                if (_nextUpdate < DateTime.UtcNow && (Settings.Get.Provider.AutoImport || torrents.Any(t => t.RdStatus != TorrentStatus.Finished)))
                 {
                     logger.LogDebug($"Updating torrent info from debrid provider");
-                    
+
                     var updateTime = Settings.Get.Provider.CheckInterval * 3;
 
                     if (updateTime < 30)
