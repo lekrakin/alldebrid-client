@@ -107,7 +107,7 @@ builder.Services.AddSession();
 
 builder.Services.AddSignalR(hubOptions =>
 {
-    hubOptions.EnableDetailedErrors = true;
+    hubOptions.EnableDetailedErrors = builder.Environment.IsDevelopment();
 });
 
 builder.Services.AddHealthChecks();

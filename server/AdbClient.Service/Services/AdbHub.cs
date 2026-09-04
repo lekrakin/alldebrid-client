@@ -1,8 +1,10 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 
 namespace AdbClient.Service.Services;
 
+[Authorize(Policy = "AuthSetting")]
 public class AdbHub : Hub
 {
     private static readonly ConcurrentDictionary<string, string> Users = new();
