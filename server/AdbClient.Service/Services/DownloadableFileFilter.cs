@@ -1,5 +1,6 @@
-﻿using System.Text.RegularExpressions;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
+using AdbClient.Data.Helpers;
 using AdbClient.Data.Models.Data;
 
 namespace AdbClient.Service.Services;
@@ -20,13 +21,13 @@ public class DownloadableFileFilter(ILogger<DownloadableFileFilter> logger) : ID
         {
             logger.LogDebug("File {filePath} was included after filtering", filePath);
         }
-        
+
         return isDownloadable;
     }
 
     private bool PassesSizeFilter(Torrent torrent, string filePath, long fileSize)
     {
-        if (torrent.DownloadMinSize <= 0 || fileSize > torrent.DownloadMinSize * 1024 * 1024)
+        if (torrent.DownloadMinSize <= 0 || fileSize > torrent.DownloadMinSize * 1024L * 1024L)
         {
             return true;
         }
@@ -43,7 +44,17 @@ public class DownloadableFileFilter(ILogger<DownloadableFileFilter> logger) : ID
 
     private bool PassesIncludeRegexFilter(Torrent torrent, string filePath)
     {
-        if (string.IsNullOrWhiteSpace(torrent.IncludeRegex) || Regex.IsMatch(filePath, torrent.IncludeRegex))
+        if (string.IsNullOrWhiteSpace(torrent.IncludeRegex))
+        {
+            return true;
+        }
+
+        if (!TryIsMatch(filePath, torrent.IncludeRegex, "include", out var isMatch))
+        {
+            return false;
+        }
+
+        if (isMatch)
         {
             return true;
         }
@@ -61,7 +72,17 @@ public class DownloadableFileFilter(ILogger<DownloadableFileFilter> logger) : ID
             return true;
         }
 
-        if (string.IsNullOrWhiteSpace(torrent.ExcludeRegex) || !Regex.IsMatch(filePath, torrent.ExcludeRegex))
+        if (string.IsNullOrWhiteSpace(torrent.ExcludeRegex))
+        {
+            return true;
+        }
+
+        if (!TryIsMatch(filePath, torrent.ExcludeRegex, "exclude", out var isMatch))
+        {
+            return false;
+        }
+
+        if (!isMatch)
         {
             return true;
         }
@@ -69,5 +90,35 @@ public class DownloadableFileFilter(ILogger<DownloadableFileFilter> logger) : ID
         logger.LogDebug("Not downloading file {filePath} matches regex {excludeRegex}", filePath, torrent.ExcludeRegex);
 
         return false;
+    }
+
+    private bool TryIsMatch(string filePath, string pattern, string filterName, out bool isMatch)
+    {
+        try
+        {
+            isMatch = BoundedRegex.IsMatch(filePath, pattern);
+            return true;
+        }
+        catch (RegexMatchTimeoutException ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Not downloading file {FilePath}: the {FilterName} regular expression exceeded the {RegexTimeout} safety limit",
+                filePath,
+                filterName,
+                BoundedRegex.MatchTimeout);
+            isMatch = false;
+            return false;
+        }
+        catch (ArgumentException ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Not downloading file {FilePath}: the {FilterName} regular expression is invalid",
+                filePath,
+                filterName);
+            isMatch = false;
+            return false;
+        }
     }
 }

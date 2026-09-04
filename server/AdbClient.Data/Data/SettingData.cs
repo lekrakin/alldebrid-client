@@ -3,7 +3,6 @@ using System.ComponentModel.DataAnnotations;
 using System.Globalization;
 using System.Reflection;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using AdbClient.Data.Helpers;
 using AdbClient.Data.Models.Data;
 using AdbClient.Data.Models.Internal;
@@ -298,7 +297,7 @@ public class SettingData(DataContext dataContext, ILogger<SettingData> logger)
 
         try
         {
-            _ = new Regex(value, RegexOptions.None, TimeSpan.FromSeconds(1));
+            _ = BoundedRegex.Create(value);
             return value;
         }
         catch (ArgumentException ex)

@@ -1,5 +1,6 @@
-﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging;
 using Moq;
+using System.Text.RegularExpressions;
 using AdbClient.Data.Models.Data;
 using AdbClient.Service.Services;
 
@@ -17,7 +18,7 @@ public class DownloadableFileFilterTest
         {
             RdId = "1"
         };
-        
+
         var fileFilter = new DownloadableFileFilter(mocks.LoggerMock.Object);
 
         // Act
@@ -27,11 +28,51 @@ public class DownloadableFileFilterTest
         Assert.True(result);
     }
 
+    [Fact]
+    public void IsDownloadable_WhenMinimumSizeIsIntMaxValue_DoesNotOverflow()
+    {
+        var torrent = new Torrent
+        {
+            RdId = "1",
+            DownloadMinSize = int.MaxValue
+        };
+        var fileFilter = new DownloadableFileFilter(Mock.Of<ILogger<DownloadableFileFilter>>());
+
+        var result = fileFilter.IsDownloadable(torrent, "file.txt", 1);
+
+        Assert.False(result);
+    }
+
+    [Fact]
+    public void IsDownloadable_WhenIncludeRegexTimesOut_FailsClosedAndLogsWarning()
+    {
+        var logger = new Mock<ILogger<DownloadableFileFilter>>();
+        var torrent = new Torrent
+        {
+            RdId = "1",
+            IncludeRegex = "^(a+)+$"
+        };
+        var fileFilter = new DownloadableFileFilter(logger.Object);
+        var pathologicalPath = new string('a', 100_000) + "!";
+
+        var result = fileFilter.IsDownloadable(torrent, pathologicalPath, long.MaxValue);
+
+        Assert.False(result);
+        logger.Verify(
+            entry => entry.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((value, _) => value.ToString()!.Contains("safety limit")),
+                It.IsAny<RegexMatchTimeoutException>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
+
     [Theory]
     // downloadMinSize is in MB, fileSize is in B
     [InlineData(100, 20 * 1024 * 1024)]
-    [InlineData(2,   2 * 1024 * 1024)]
-    [InlineData(2,   2 * (1000 * 1000 + 1))] // mostly to show we use 1024 not 1000 for conversion
+    [InlineData(2, 2 * 1024 * 1024)]
+    [InlineData(2, 2 * (1000 * 1000 + 1))] // mostly to show we use 1024 not 1000 for conversion
     public void IsDownloadable_WhenDownloadMinSizeSpecified_AndDownloadBelowSize_ReturnsFalse(int downloadMinSize, long fileSize)
     {
         // Arrange
@@ -51,10 +92,10 @@ public class DownloadableFileFilterTest
         // Assert
         Assert.False(result);
     }
-    
+
     [Theory]
     [InlineData(100, 110 * 1024 * 1024)]
-    [InlineData(2,   2 * 1024 * 1024 + 1)]
+    [InlineData(2, 2 * 1024 * 1024 + 1)]
     public void IsDownloadable_WhenDownloadMinSizeSpecified_AndDownloadAboveSize_ReturnsTrue(int downloadMinSize, long fileSize)
     {
         // Arrange
@@ -74,7 +115,7 @@ public class DownloadableFileFilterTest
         // Assert
         Assert.True(result);
     }
-    
+
     [Theory]
     [InlineData("file", "no-match")]
     [InlineData("file", "even/in/a/subdirectory.txt")]
@@ -124,7 +165,7 @@ public class DownloadableFileFilterTest
         // Assert
         Assert.True(result);
     }
-    
+
     [Theory]
     [InlineData("file", "no-match")]
     [InlineData("file", "even/in/a/subdirectory.txt")]
@@ -211,14 +252,14 @@ public class DownloadableFileFilterTest
     {
         // Arrange
         var mocks = new Mocks();
-        
+
         var torrent = new Torrent
         {
             RdId = "1",
             IncludeRegex = includeRegex,
             DownloadMinSize = minSize
         };
-        
+
         var fileFilter = new DownloadableFileFilter(mocks.LoggerMock.Object);
 
         // Act
@@ -227,7 +268,7 @@ public class DownloadableFileFilterTest
         // Assert
         Assert.False(result);
     }
-    
+
     [Theory]
     [InlineData(10, "file", 10 * 1024 * 1024 - 1, "file.txt")]
     public void IsDownloadable_WhenBothDownloadMinSizeAndIncludeRegexSpecified_AndDownloadBelowSizeAndMatchesRegex_ReturnsFalse(
@@ -238,14 +279,14 @@ public class DownloadableFileFilterTest
     {
         // Arrange
         var mocks = new Mocks();
-        
+
         var torrent = new Torrent
         {
             RdId = "1",
             IncludeRegex = includeRegex,
             DownloadMinSize = minSize
         };
-        
+
         var fileFilter = new DownloadableFileFilter(mocks.LoggerMock.Object);
 
         // Act
