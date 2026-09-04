@@ -185,6 +185,98 @@ public class AuthControllerTest
     }
 
     [Fact]
+    public async Task Update_CreatesTheFirstAccountWhenBothCredentialsAreProvided()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var dataContext = CreateDataContext(connection);
+        await dataContext.Database.EnsureCreatedAsync();
+
+        var userManager = CreateUserManager();
+        userManager.Setup(manager => manager.CreateAsync(
+                       It.Is<IdentityUser>(user => user.UserName == "first-user"),
+                       "first-password"))
+                   .ReturnsAsync(IdentityResult.Success);
+        var authentication = new Authentication(null!, userManager.Object, new UserData(dataContext));
+        var controller = new AuthController(authentication, null!);
+
+        var result = await controller.Update(new AuthControllerUpdateRequest
+        {
+            UserName = "first-user",
+            Password = "first-password"
+        });
+
+        Assert.IsType<OkResult>(result);
+        userManager.VerifyAll();
+        userManager.Verify(manager => manager.UpdateAsync(It.IsAny<IdentityUser>()), Times.Never());
+        userManager.Verify(
+            manager => manager.ResetPasswordAsync(
+                It.IsAny<IdentityUser>(),
+                It.IsAny<string>(),
+                It.IsAny<string>()),
+            Times.Never());
+    }
+
+    [Theory]
+    [InlineData("first-user", null)]
+    [InlineData(null, "first-password")]
+    [InlineData("first-user", " ")]
+    [InlineData(" ", "first-password")]
+    public async Task Update_RequiresBothCredentialsWhenCreatingTheFirstAccount(
+        string? userName,
+        string? password)
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var dataContext = CreateDataContext(connection);
+        await dataContext.Database.EnsureCreatedAsync();
+
+        var userManager = CreateUserManager();
+        var authentication = new Authentication(null!, userManager.Object, new UserData(dataContext));
+        var controller = new AuthController(authentication, null!);
+
+        var result = await controller.Update(new AuthControllerUpdateRequest
+        {
+            UserName = userName,
+            Password = password
+        });
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Equal("Enter both a username and password to create the first account.", badRequest.Value);
+        userManager.Verify(
+            manager => manager.CreateAsync(It.IsAny<IdentityUser>(), It.IsAny<string>()),
+            Times.Never());
+    }
+
+    [Fact]
+    public async Task Update_ReturnsIdentityValidationErrorsWhenCreatingTheFirstAccount()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var dataContext = CreateDataContext(connection);
+        await dataContext.Database.EnsureCreatedAsync();
+
+        var expectedError = new IdentityError { Description = "Password does not meet the configured requirements." };
+        var userManager = CreateUserManager();
+        userManager.Setup(manager => manager.CreateAsync(
+                       It.Is<IdentityUser>(user => user.UserName == "first-user"),
+                       "invalid-password"))
+                   .ReturnsAsync(IdentityResult.Failed(expectedError));
+        var authentication = new Authentication(null!, userManager.Object, new UserData(dataContext));
+        var controller = new AuthController(authentication, null!);
+
+        var result = await controller.Update(new AuthControllerUpdateRequest
+        {
+            UserName = "first-user",
+            Password = "invalid-password"
+        });
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Equal(expectedError.Description, badRequest.Value);
+        userManager.VerifyAll();
+    }
+
+    [Fact]
     public async Task Update_RejectsRequestWithoutAnyCredentialChange()
     {
         var controller = new AuthController(null!, null!);

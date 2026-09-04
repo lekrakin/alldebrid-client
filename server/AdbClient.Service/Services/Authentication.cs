@@ -38,7 +38,21 @@ public class Authentication(SignInManager<IdentityUser> signInManager, UserManag
 
     public async Task<IdentityResult> Update(string? newUserName, string? newPassword)
     {
-        var user = await GetUser() ?? throw new Exception("No logged in user found");
+        var user = await GetUser();
+
+        if (user == null)
+        {
+            if (string.IsNullOrWhiteSpace(newUserName) || string.IsNullOrWhiteSpace(newPassword))
+            {
+                return IdentityResult.Failed(new IdentityError
+                {
+                    Code = "InitialCredentialsRequired",
+                    Description = "Enter both a username and password to create the first account."
+                });
+            }
+
+            return await Register(newUserName, newPassword);
+        }
 
         if (!string.IsNullOrWhiteSpace(newUserName))
         {
