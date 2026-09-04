@@ -10,6 +10,7 @@ using Moq;
 
 namespace AdbClient.Service.Test.Services;
 
+[Collection(SettingsIsolationCollection.Name)]
 public class ProviderSynchronizationTest
 {
     [Fact]

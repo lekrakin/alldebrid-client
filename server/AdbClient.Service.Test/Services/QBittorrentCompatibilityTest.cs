@@ -19,6 +19,7 @@ using DownloadClientKind = AdbClient.Data.Enums.DownloadClient;
 
 namespace AdbClient.Service.Test.Services;
 
+[Collection(SettingsIsolationCollection.Name)]
 public class QBittorrentCompatibilityTest
 {
     [Fact]

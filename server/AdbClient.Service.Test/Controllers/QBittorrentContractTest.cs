@@ -20,6 +20,7 @@ using Microsoft.Extensions.Logging;
 
 namespace AdbClient.Service.Test.Controllers;
 
+[Collection(SettingsIsolationCollection.Name)]
 public class QBittorrentContractTest
 {
     [Fact]

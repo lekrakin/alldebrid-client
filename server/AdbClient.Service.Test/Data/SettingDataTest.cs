@@ -8,6 +8,7 @@ using Moq;
 
 namespace AdbClient.Service.Test.Data;
 
+[Collection(SettingsIsolationCollection.Name)]
 public class SettingDataTest
 {
     [Fact]

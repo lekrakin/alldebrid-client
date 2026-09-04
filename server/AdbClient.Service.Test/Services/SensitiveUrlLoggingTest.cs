@@ -12,7 +12,7 @@ using Serilog.Events;
 
 namespace AdbClient.Service.Test.Services;
 
-[Collection(nameof(SensitiveUrlLoggingCollection))]
+[Collection(SettingsIsolationCollection.Name)]
 public sealed class SensitiveUrlLoggingTest
 {
     [Theory]
@@ -674,6 +674,3 @@ public sealed class SensitiveUrlLoggingTest
         }
     }
 }
-
-[CollectionDefinition(nameof(SensitiveUrlLoggingCollection), DisableParallelization = true)]
-public sealed class SensitiveUrlLoggingCollection;
