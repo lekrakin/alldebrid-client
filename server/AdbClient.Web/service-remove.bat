@@ -2,10 +2,16 @@
 setlocal EnableExtensions
 
 set "serviceName=AllDebridClient"
-set "firewallRule=AllDebridClient"
+set "executable=%~dp0AdbClient.Web.exe"
+set "firewallScript=%~dp0service-firewall.ps1"
 
 net.exe session >nul 2>&1
 if errorlevel 1 goto :administratorRequired
+
+if not exist "%firewallScript%" (
+    echo ERROR: Firewall management script not found: "%firewallScript%"
+    exit /b 1
+)
 
 sc.exe query "%serviceName%" >nul 2>&1
 if errorlevel 1 goto :removeFirewall
@@ -32,19 +38,14 @@ if errorlevel 1 (
 )
 
 :removeFirewall
-netsh.exe advfirewall firewall show rule name="%firewallRule%" >nul 2>&1
+echo Checking firewall rule...
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%firewallScript%" -Action Remove -ProgramPath "%executable%"
 if errorlevel 1 (
-    echo Firewall rule "%firewallRule%" is already absent.
-) else (
-    echo Removing firewall rule...
-    netsh.exe advfirewall firewall delete rule name="%firewallRule%" >nul
-    if errorlevel 1 (
-        echo ERROR: Firewall rule "%firewallRule%" could not be removed.
-        exit /b 1
-    )
+    echo ERROR: The managed firewall rule could not be removed.
+    exit /b 1
 )
 
-echo Windows service "%serviceName%" and its firewall rule are removed.
+echo Windows service "%serviceName%" and its managed firewall rule are removed.
 exit /b 0
 
 :administratorRequired

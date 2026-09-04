@@ -2,8 +2,8 @@
 setlocal EnableExtensions EnableDelayedExpansion
 
 set "serviceName=AllDebridClient"
-set "firewallRule=AllDebridClient"
 set "executable=%~dp0AdbClient.Web.exe"
+set "firewallScript=%~dp0service-firewall.ps1"
 set "firewallCreated=0"
 
 net.exe session >nul 2>&1
@@ -14,23 +14,25 @@ if not exist "%executable%" (
     exit /b 1
 )
 
+if not exist "%firewallScript%" (
+    echo ERROR: Firewall management script not found: "%firewallScript%"
+    exit /b 1
+)
+
 sc.exe query "%serviceName%" >nul 2>&1
 if not errorlevel 1 (
     echo ERROR: Windows service "%serviceName%" is already installed.
     exit /b 1
 )
 
-netsh.exe advfirewall firewall show rule name="%firewallRule%" >nul 2>&1
-if errorlevel 1 (
-    echo Adding firewall rule...
-    netsh.exe advfirewall firewall add rule name="%firewallRule%" dir=in action=allow program="%executable%" enable=yes >nul
-    if errorlevel 1 (
-        echo ERROR: Could not add the firewall rule.
-        exit /b 1
-    )
+echo Checking firewall rule...
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%firewallScript%" -Action Ensure -ProgramPath "%executable%"
+set "firewallResult=!errorlevel!"
+if "!firewallResult!"=="10" (
     set "firewallCreated=1"
-) else (
-    echo Keeping existing firewall rule "%firewallRule%".
+) else if not "!firewallResult!"=="0" (
+    echo ERROR: Could not configure the managed firewall rule.
+    exit /b 1
 )
 
 echo Installing Windows service...
@@ -54,7 +56,7 @@ sc.exe delete "%serviceName%" >nul 2>&1
 call :waitForDeletion 15 >nul 2>&1
 
 :installFailed
-if "!firewallCreated!"=="1" netsh.exe advfirewall firewall delete rule name="%firewallRule%" >nul 2>&1
+if "!firewallCreated!"=="1" powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%firewallScript%" -Action Remove -ProgramPath "%executable%" >nul 2>&1
 exit /b 1
 
 :administratorRequired
