@@ -597,19 +597,36 @@ public class Torrents(
                 }
             }
 
-            foreach (var torrent in torrents)
-            {
-                var rdTorrent = rdTorrents.FirstOrDefault(m => m.Id == torrent.RdId);
-
-                if (rdTorrent == null && Settings.Get.Provider.AutoDelete && torrent.RdStatus != TorrentStatus.Queued)
-                {
-                    await Delete(torrent.TorrentId, true, false, true);
-                }
-            }
+            await RemoveMissingProviderRecords(torrents, rdTorrents, Settings.Get.Provider);
         }
         finally
         {
             ProviderUpdateLock.Release();
+        }
+    }
+
+    internal async Task RemoveMissingProviderRecords(
+        IEnumerable<Torrent> torrents,
+        IEnumerable<TorrentClientTorrent> providerTorrents,
+        DbSettingsProvider settings)
+    {
+        if (!settings.AutoDelete)
+        {
+            return;
+        }
+
+        var providerIds = providerTorrents
+            .Select(providerTorrent => providerTorrent.Id)
+            .ToHashSet(StringComparer.Ordinal);
+
+        foreach (var torrent in torrents)
+        {
+            var missingFromProvider = torrent.RdId == null || !providerIds.Contains(torrent.RdId);
+
+            if (missingFromProvider && torrent.RdStatus != TorrentStatus.Queued)
+            {
+                await Delete(torrent.TorrentId, true, false, false);
+            }
         }
     }
 

@@ -178,7 +178,7 @@ public class DbSettingsProvider
     public int Timeout { get; set; } = 10;
 
     [DisplayName("Status check interval (seconds)")]
-    [Description("Polling interval while the UI is connected. Minimum 5; tripled when there are no active downloads.")]
+    [Description("Provider polling interval while the UI is connected. Minimum 5 seconds; without a UI connection, polling is less frequent (three times this interval, minimum 30 seconds).")]
     [Range(5, int.MaxValue)]
     public int CheckInterval { get; set; } = 10;
 

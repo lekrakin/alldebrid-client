@@ -1,4 +1,6 @@
 using AdbClient.Data.Enums;
+using AdbClient.Data.Models.Data;
+using AdbClient.Data.Models.Internal;
 using AdbClient.Service.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -28,7 +30,7 @@ public class ProviderUpdater(ILogger<ProviderUpdater> logger, IServiceProvider s
             {
                 var torrents = await torrentService.Get();
 
-                if (_nextUpdate < DateTime.UtcNow && (Settings.Get.Provider.AutoImport || torrents.Any(t => t.RdStatus != TorrentStatus.Finished)))
+                if (_nextUpdate < DateTime.UtcNow && ShouldReconcileProvider(Settings.Get.Provider, torrents))
                 {
                     logger.LogDebug($"Updating torrent info from debrid provider");
 
@@ -65,5 +67,12 @@ public class ProviderUpdater(ILogger<ProviderUpdater> logger, IServiceProvider s
         }
 
         logger.LogInformation("ProviderUpdater stopped.");
+    }
+
+    internal static bool ShouldReconcileProvider(DbSettingsProvider settings, IEnumerable<Torrent> torrents)
+    {
+        return settings.AutoImport ||
+               settings.AutoDelete ||
+               torrents.Any(torrent => torrent.RdStatus != TorrentStatus.Finished);
     }
 }
