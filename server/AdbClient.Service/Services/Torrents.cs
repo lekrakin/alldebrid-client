@@ -921,9 +921,17 @@ public class Torrents(
             return;
         }
 
-        var torrent = await torrentData.GetById(torrentId) ?? throw new Exception($"Cannot find Torrent with ID {torrentId}");
-
         var downloadsForTorrent = await downloads.GetForTorrent(torrentId);
+
+        if (downloadsForTorrent.Count == 0)
+        {
+            logger.LogDebug(
+                "Skipping completion command for torrent {TorrentId} because no files were downloaded",
+                torrentId);
+            return;
+        }
+
+        var torrent = await torrentData.GetById(torrentId) ?? throw new Exception($"Cannot find Torrent with ID {torrentId}");
 
         var fileName = settings.Integrations.CompletionCommand.ExecutablePath;
         var arguments = settings.Integrations.CompletionCommand.Arguments ?? "";

@@ -257,6 +257,27 @@ public class TorrentsTest
         mocks.ProcessFactoryMock.VerifyNoOtherCalls();
     }
 
+    [Fact]
+    public async Task RunTorrentComplete_WhenNoFilesWereDownloaded_ShouldNotRunCommand()
+    {
+        var settings = new DbSettings
+        {
+            Integrations = new()
+            {
+                CompletionCommand = new() { ExecutablePath = "/bin/echo" }
+            }
+        };
+        var torrentId = Guid.NewGuid();
+        var mocks = new Mocks();
+        mocks.DownloadsMock.Setup(downloads => downloads.GetForTorrent(torrentId)).ReturnsAsync([]);
+        var service = CreateService(mocks, _ => Task.CompletedTask);
+
+        await service.RunTorrentComplete(torrentId, settings);
+
+        mocks.ProcessFactoryMock.VerifyNoOtherCalls();
+        mocks.TorrentDataMock.VerifyNoOtherCalls();
+    }
+
     [Theory]
     [MemberData(nameof(TorrentAndDownload))]
     public async Task RunTorrentComplete_WhenStdOut_Logs(Torrent torrent, List<Download> downloads)
