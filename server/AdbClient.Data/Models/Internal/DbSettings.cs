@@ -102,10 +102,6 @@ public class DbSettingsTorrentDefaults : DbSettingsDownloadRules
 
 public class DbSettingsDownloadRules
 {
-    [DisplayName("Only download available files")]
-    [Description("Skip files AllDebrid reports as unavailable.")]
-    public bool OnlyDownloadAvailableFiles { get; set; } = true;
-
     [DisplayName("Minimum file size (MB)")]
     [Description("Skip files at or below this size. 0 = download all. A small value can exclude artwork and metadata files.")]
     [Range(0, int.MaxValue)]
@@ -140,7 +136,7 @@ public class DbSettingsDownloadRules
     public int TorrentLifetime { get; set; }
 
     [DisplayName("Priority")]
-    [Description("Default queue priority (1 = highest). 0 assigns the next available priority.")]
+    [Description("Default queue priority. 0 uses normal first-in, first-out ordering; positive values run first, with lower values taking precedence.")]
     [Range(0, int.MaxValue)]
     public int Priority { get; set; }
 }

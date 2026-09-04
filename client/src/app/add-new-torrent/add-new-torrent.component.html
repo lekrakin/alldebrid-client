@@ -27,7 +27,6 @@
           [ngModel]="magnetLink()"
           (ngModelChange)="magnetLink.set($event)"
           [disabled]="saving()"
-          (blur)="checkFiles()"
           (paste)="onPaste($event)"
         ></textarea>
       </div>
@@ -44,17 +43,14 @@
     <div class="separator">Advanced settings</div>
 
     <div class="field">
-      <label class="label">Post Download Action</label>
+      <label class="label">Host download action</label>
       <div class="control select is-fullwidth">
         <select [ngModel]="hostDownloadAction()" (ngModelChange)="hostDownloadAction.set($event)">
           <option [ngValue]="0">Download all files to host</option>
           <option [ngValue]="1">Don't download any files to host</option>
         </select>
       </div>
-      <p class="help">
-        When a torrent is finished downloading on the provider, perform this action. Use this setting if you only want
-        to add files to your debrid provider but not download them to the host.
-      </p>
+      <p class="help">Choose whether completed provider files are downloaded to this host.</p>
     </div>
 
     <div class="field">
@@ -79,12 +75,9 @@
       </div>
       @if (provider === 'AllDebrid') {
         <p class="help">
-          When downloading with AllDebrid it cannot be guaranteed that only files above this limit will be download as
+          When downloading with AllDebrid it cannot be guaranteed that only files above this limit will be downloaded as
           some files are grouped together in 1 large archive.
         </p>
-      }
-      @if (downloadAction() === 2) {
-        <p class="help">This setting does not apply to manually selected files.</p>
       }
     </div>
 
@@ -93,13 +86,7 @@
       <div class="control">
         <div class="field" style="margin-bottom: 0">
           <div class="control is-expanded">
-            <input
-              class="input"
-              type="text"
-              [ngModel]="includeRegex()"
-              (ngModelChange)="includeRegex.set($event)"
-              (blur)="verifyRegex()"
-            />
+            <input class="input" type="text" [ngModel]="includeRegex()" (ngModelChange)="includeRegex.set($event)" />
           </div>
         </div>
       </div>
@@ -107,12 +94,6 @@
         Select only the files that are matching this regular expression. Only use this setting OR the Exclude files
         setting, not both.
       </p>
-      @if (downloadAction() === 2) {
-        <p class="help">This setting does not apply to manually selected files.</p>
-      }
-      @if (includeRegexError(); as includeRegexError) {
-        <p class="help is-danger">{{ includeRegexError }}</p>
-      }
     </div>
 
     <div class="field">
@@ -120,13 +101,7 @@
       <div class="control">
         <div class="field" style="margin-bottom: 0">
           <div class="control is-expanded">
-            <input
-              class="input"
-              type="text"
-              [ngModel]="excludeRegex()"
-              (ngModelChange)="excludeRegex.set($event)"
-              (blur)="verifyRegex()"
-            />
+            <input class="input" type="text" [ngModel]="excludeRegex()" (ngModelChange)="excludeRegex.set($event)" />
           </div>
         </div>
       </div>
@@ -134,12 +109,6 @@
         Ignore files that are matching this regular expression. Only use this setting OR the Include files setting, not
         both.
       </p>
-      @if (downloadAction() === 2) {
-        <p class="help">This setting does not apply to manually selected files.</p>
-      }
-      @if (excludeRegexError(); as excludeRegexError) {
-        <p class="help is-danger">{{ excludeRegexError }}</p>
-      }
     </div>
 
     <div class="field">
@@ -152,6 +121,7 @@
           <option [ngValue]="3">Remove torrent from client</option>
         </select>
       </div>
+      <p class="help">Controls provider and client records after local files are saved. Local files are retained.</p>
     </div>
 
     <div class="field">
@@ -164,10 +134,7 @@
           (ngModelChange)="finishedActionDelay.set($event)"
         />
       </div>
-      <p class="help">
-        When a torrent is finished downloading on the provider, perform this action. Use this setting if you only want
-        to add files to your debrid provider but not download them to the host.
-      </p>
+      <p class="help">Minutes to wait before applying the finished action.</p>
     </div>
 
     <div class="field">
@@ -234,8 +201,8 @@
         />
       </div>
       <p class="help">
-        When a download has been in error for this many minutes, delete it from the provider and the client. 0 to
-        disable.
+        When a download has been in error for this many minutes, delete its provider record, client record, and local
+        files. 0 to disable.
       </p>
     </div>
     <div class="field">

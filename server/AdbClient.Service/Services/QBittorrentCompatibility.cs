@@ -530,9 +530,6 @@ public sealed class QBittorrentCompatibility(
         {
             Category = normalizedCategory,
             DownloadClient = Data.Enums.DownloadClient.Internal,
-            DownloadAction = defaults.OnlyDownloadAvailableFiles
-                ? TorrentDownloadAction.DownloadAvailableFiles
-                : TorrentDownloadAction.DownloadAll,
             HostDownloadAction = defaults.HostDownloadAction,
             FinishedAction = defaults.FinishedAction,
             FinishedActionDelay = defaults.FinishedActionDelay,

@@ -79,20 +79,6 @@
             }
           </div>
           <div class="field">
-            <label class="label">Post Torrent Download Action</label>
-            @switch (torrent.downloadAction) {
-              @case (0) {
-                Download all files above a certain size
-              }
-              @case (1) {
-                Download all available files on AllDebrid above a certain size
-              }
-              @case (2) {
-                Pick files I want to download
-              }
-            }
-          </div>
-          <div class="field">
             <label class="label">Finished action</label>
             @switch (torrent.finishedAction) {
               @case (0) {

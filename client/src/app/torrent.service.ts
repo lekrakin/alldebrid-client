@@ -2,7 +2,7 @@ import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import * as signalR from '@microsoft/signalr';
 import { Observable, ReplaySubject } from 'rxjs';
-import { Torrent, TorrentFileAvailability } from './models/torrent.model';
+import { Torrent } from './models/torrent.model';
 import { APP_BASE_HREF } from '@angular/common';
 
 @Injectable({
@@ -102,18 +102,6 @@ export class TorrentService {
     return this.http.post<void>(`${this.baseHref}Api/Torrents/UploadFile`, formData);
   }
 
-  public checkFilesMagnet(magnetLink: string): Observable<TorrentFileAvailability[]> {
-    return this.http.post<TorrentFileAvailability[]>(`${this.baseHref}Api/Torrents/CheckFilesMagnet`, {
-      magnetLink,
-    });
-  }
-
-  public checkFiles(file: File): Observable<TorrentFileAvailability[]> {
-    const formData: FormData = new FormData();
-    formData.append('file', file);
-    return this.http.post<TorrentFileAvailability[]>(`${this.baseHref}Api/Torrents/CheckFiles`, formData);
-  }
-
   public delete(
     torrentId: string,
     deleteData: boolean,
@@ -137,20 +125,5 @@ export class TorrentService {
 
   public update(torrent: Torrent): Observable<void> {
     return this.http.put<void>(`${this.baseHref}Api/Torrents/Update`, torrent);
-  }
-
-  public verifyRegex(
-    includeRegex: string,
-    excludeRegex: string,
-    magnetLink: string
-  ): Observable<{ includeError: string; excludeError: string; selectedFiles: TorrentFileAvailability[] }> {
-    return this.http.post<{ includeError: string; excludeError: string; selectedFiles: TorrentFileAvailability[] }>(
-      `${this.baseHref}Api/Torrents/VerifyRegex`,
-      {
-        includeRegex,
-        excludeRegex,
-        magnetLink,
-      }
-    );
   }
 }

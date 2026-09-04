@@ -6,13 +6,11 @@ export class Torrent {
   public category: string;
   public downloadClient: number;
   public hostDownloadAction: number;
-  public downloadAction: number;
   public finishedAction: number;
   public finishedActionDelay: number;
   public downloadMinSize: number;
   public includeRegex: string;
   public excludeRegex: string;
-  public downloadManualFiles: string;
 
   public added: Date;
   public filesSelected: Date;
@@ -55,11 +53,6 @@ export class TorrentFile {
   public selected: boolean;
 
   public download: Download;
-}
-
-export class TorrentFileAvailability {
-  public filename: string;
-  public filesize: number;
 }
 
 export enum ProviderStatus {

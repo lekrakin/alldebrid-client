@@ -40,6 +40,34 @@ class Mocks
 
 public class TorrentsTest
 {
+    [Theory]
+    [InlineData(true, "include")]
+    [InlineData(true, "exclude")]
+    [InlineData(false, "include")]
+    [InlineData(false, "exclude")]
+    public async Task AddToDebridQueue_InvalidFilter_IsRejectedBeforeEnrichment(bool magnet, string filterName)
+    {
+        var mocks = new Mocks();
+        var service = CreateService(mocks, _ => Task.CompletedTask);
+        var torrent = new Torrent
+        {
+            IncludeRegex = filterName == "include" ? "[" : null,
+            ExcludeRegex = filterName == "exclude" ? "[" : null
+        };
+
+        var exception = magnet
+            ? await Assert.ThrowsAsync<ArgumentException>(() =>
+                service.AddMagnetToDebridQueue(
+                    "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567",
+                    torrent))
+            : await Assert.ThrowsAsync<ArgumentException>(() =>
+                service.AddFileToDebridQueue(Encoding.UTF8.GetBytes("not needed"), torrent));
+
+        Assert.Equal(filterName, exception.ParamName);
+        mocks.EnricherMock.VerifyNoOtherCalls();
+        mocks.TorrentDataMock.VerifyNoOtherCalls();
+    }
+
     public static TheoryData<Torrent, List<Download>> TorrentAndDownload()
     {
         var torrent = new Torrent

@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using AdbClient.Data.Data;
 using AdbClient.Data.Enums;
+using AdbClient.Data.Helpers;
 using AdbClient.Data.Models.Data;
 using AdbClient.Data.Models.Internal;
 using AdbClient.Data.Models.TorrentClient;
@@ -99,6 +100,8 @@ public class Torrents(
 
     public async Task<Torrent> AddMagnetToDebridQueue(string magnetLink, Torrent torrent)
     {
+        ValidateDownloadFilters(torrent);
+
         MagnetLink magnet;
 
         try
@@ -137,6 +140,8 @@ public class Torrents(
 
     public async Task<Torrent> AddFileToDebridQueue(Byte[] bytes, Torrent torrent)
     {
+        ValidateDownloadFilters(torrent);
+
         MonoTorrent.Torrent monoTorrent;
 
         try
@@ -189,6 +194,29 @@ public class Torrents(
         await CopyAddedTorrent(monoTorrent.Name, bytes);
 
         return newTorrent;
+    }
+
+    private static void ValidateDownloadFilters(Torrent torrent)
+    {
+        ValidateRegex(torrent.IncludeRegex, "include");
+        ValidateRegex(torrent.ExcludeRegex, "exclude");
+    }
+
+    private static void ValidateRegex(string? pattern, string name)
+    {
+        if (string.IsNullOrWhiteSpace(pattern))
+        {
+            return;
+        }
+
+        try
+        {
+            _ = BoundedRegex.Create(pattern);
+        }
+        catch (ArgumentException ex)
+        {
+            throw new ArgumentException($"Invalid {name} regular expression.", name, ex);
+        }
     }
 
     private async Task CopyAddedTorrent(string torrentName, Object fileOrMagnet)
@@ -548,7 +576,6 @@ public class Torrents(
                     {
                         Category = Settings.Get.Downloads.Defaults.Category,
                         DownloadClient = Data.Enums.DownloadClient.Internal,
-                        DownloadAction = Settings.Get.Downloads.Defaults.OnlyDownloadAvailableFiles ? TorrentDownloadAction.DownloadAvailableFiles : TorrentDownloadAction.DownloadAll,
                         HostDownloadAction = Settings.Get.Downloads.Defaults.HostDownloadAction,
                         FinishedActionDelay = Settings.Get.Downloads.Defaults.FinishedActionDelay,
                         FinishedAction = Settings.Get.Downloads.Defaults.FinishedAction,

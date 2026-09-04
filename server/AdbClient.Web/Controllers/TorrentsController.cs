@@ -1,12 +1,12 @@
 using System.Text.RegularExpressions;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
-using MonoTorrent;
 using AdbClient.Data.Helpers;
 using AdbClient.Data.Models.TorrentClient;
 using AdbClient.Service.Helpers;
 using AdbClient.Service.Services;
 using AdbClient.Web.Models.Requests;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using MonoTorrent;
 using Torrent = AdbClient.Data.Models.Data.Torrent;
 
 namespace AdbClient.Web.Controllers;
@@ -86,7 +86,15 @@ public class TorrentsController(ILogger<TorrentsController> logger, Torrents tor
 
         var bytes = memoryStream.ToArray();
 
-        await torrents.AddFileToDebridQueue(bytes, formData.Torrent);
+        try
+        {
+            await torrents.AddFileToDebridQueue(bytes, formData.Torrent);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidDataException)
+        {
+            logger.LogWarning(ex, "Rejected torrent file upload");
+            return BadRequest(ex.Message);
+        }
 
         return Ok();
     }
@@ -112,7 +120,15 @@ public class TorrentsController(ILogger<TorrentsController> logger, Torrents tor
 
         logger.LogDebug($"Add magnet");
 
-        await torrents.AddMagnetToDebridQueue(request.MagnetLink, request.Torrent);
+        try
+        {
+            await torrents.AddMagnetToDebridQueue(request.MagnetLink, request.Torrent);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidDataException)
+        {
+            logger.LogWarning(ex, "Rejected magnet upload");
+            return BadRequest(ex.Message);
+        }
 
         return Ok();
     }

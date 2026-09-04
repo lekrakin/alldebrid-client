@@ -87,7 +87,6 @@ public class SettingDataTest
             ("DownloadClient:Default:Category", "Downloads:Defaults:Category", "radarr"),
             ("DownloadClient:Default:FinishedAction", "Downloads:Defaults:FinishedAction", "0"),
             ("DownloadClient:Default:FinishedActionDelay", "Downloads:Defaults:FinishedActionDelay", "15"),
-            ("DownloadClient:Default:OnlyDownloadAvailableFiles", "Downloads:Defaults:OnlyDownloadAvailableFiles", "True"),
             ("DownloadClient:Default:MinFileSize", "Downloads:Defaults:MinFileSize", "10"),
             ("DownloadClient:Default:IncludeRegex", "Downloads:Defaults:IncludeRegex", @"\.mkv$"),
             ("DownloadClient:Default:ExcludeRegex", "Downloads:Defaults:ExcludeRegex", @"\.txt$"),
@@ -142,7 +141,6 @@ public class SettingDataTest
             ("DownloadClient:DownloadPath", "Storage:DownloadPath", "/srv/direct-upgrade-downloads"),
             ("DownloadClient:MappedPath", "Integrations:ReportedDownloadPath", "/media/direct-upgrade-downloads"),
             ("Provider:Default:Category", "Downloads:Defaults:Category", "provider-import"),
-            ("Provider:Default:OnlyDownloadAvailableFiles", "Downloads:Defaults:OnlyDownloadAvailableFiles", "False"),
             ("Provider:Default:MinFileSize", "Downloads:Defaults:MinFileSize", "20"),
             ("Provider:Default:TorrentRetryAttempts", "Downloads:Defaults:TorrentRetryAttempts", "8"),
             ("Provider:Default:DownloadRetryAttempts", "Downloads:Defaults:DownloadRetryAttempts", "9"),
@@ -168,6 +166,40 @@ public class SettingDataTest
             Assert.DoesNotContain(migration.LegacyKey, settings.Keys);
             Assert.Equal(migration.Value, settings[migration.CurrentKey].Value);
         }
+    }
+
+    [Fact]
+    public async Task Seed_RemovesObsoleteAvailabilitySettings()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<DataContext>()
+                     .UseSqlite(connection)
+                     .Options;
+        await using var dataContext = new DataContext(options);
+        await dataContext.Database.EnsureCreatedAsync();
+
+        string[] obsoleteKeys =
+        [
+            "Downloads:Defaults:OnlyDownloadAvailableFiles",
+            "DownloadClient:Default:OnlyDownloadAvailableFiles",
+            "Provider:Default:OnlyDownloadAvailableFiles"
+        ];
+        dataContext.Settings.AddRange(obsoleteKeys.Select(key => new Setting
+        {
+            SettingId = key,
+            Value = "True"
+        }));
+        await dataContext.SaveChangesAsync();
+
+        var settingData = new SettingData(dataContext, Mock.Of<ILogger<SettingData>>());
+        await settingData.Seed();
+
+        var persistedKeys = await dataContext.Settings.AsNoTracking()
+                                             .Select(setting => setting.SettingId)
+                                             .ToListAsync();
+        Assert.DoesNotContain(persistedKeys, key => obsoleteKeys.Contains(key, StringComparer.Ordinal));
     }
 
     [Fact]

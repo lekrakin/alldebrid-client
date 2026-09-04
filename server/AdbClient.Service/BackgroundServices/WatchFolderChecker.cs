@@ -83,9 +83,6 @@ public class WatchFolderChecker(ILogger<WatchFolderChecker> logger, IServiceProv
                             Category = Settings.Get.Downloads.Defaults.Category,
                             HostDownloadAction = Settings.Get.Downloads.Defaults.HostDownloadAction,
                             FinishedActionDelay = Settings.Get.Downloads.Defaults.FinishedActionDelay,
-                            DownloadAction = Settings.Get.Downloads.Defaults.OnlyDownloadAvailableFiles
-                                ? TorrentDownloadAction.DownloadAvailableFiles
-                                : TorrentDownloadAction.DownloadAll,
                             FinishedAction = Settings.Get.Downloads.Defaults.FinishedAction,
                             DownloadMinSize = Settings.Get.Downloads.Defaults.MinFileSize,
                             IncludeRegex = Settings.Get.Downloads.Defaults.IncludeRegex,

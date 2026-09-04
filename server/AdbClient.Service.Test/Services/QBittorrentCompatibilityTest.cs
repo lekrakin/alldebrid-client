@@ -312,7 +312,6 @@ public class QBittorrentCompatibilityTest
         Settings.Get.Downloads.Defaults = new DbSettingsTorrentDefaults
         {
             Category = "from-defaults",
-            OnlyDownloadAvailableFiles = true,
             HostDownloadAction = TorrentHostDownloadAction.DownloadNone,
             FinishedAction = TorrentFinishedAction.RemoveClient,
             FinishedActionDelay = 7,
@@ -361,7 +360,6 @@ public class QBittorrentCompatibilityTest
                 DownloadClientKind.Internal,
                 It.Is<Torrent>(torrent =>
                     torrent.Category == "from-defaults" &&
-                    torrent.DownloadAction == TorrentDownloadAction.DownloadAvailableFiles &&
                     torrent.HostDownloadAction == TorrentHostDownloadAction.DownloadNone &&
                     torrent.FinishedAction == TorrentFinishedAction.RemoveClient &&
                     torrent.FinishedActionDelay == 7 &&
@@ -744,7 +742,6 @@ public class QBittorrentCompatibilityTest
         Settings.Get.Downloads.Defaults = new DbSettingsTorrentDefaults
         {
             Category = "default",
-            OnlyDownloadAvailableFiles = false,
             HostDownloadAction = TorrentHostDownloadAction.DownloadAll,
             FinishedAction = TorrentFinishedAction.None,
             FinishedActionDelay = 4,
@@ -784,7 +781,6 @@ public class QBittorrentCompatibilityTest
                 DownloadClientKind.Internal,
                 It.Is<Torrent>(torrent =>
                     torrent.Category == "radarr" &&
-                    torrent.DownloadAction == TorrentDownloadAction.DownloadAll &&
                     torrent.HostDownloadAction == TorrentHostDownloadAction.DownloadAll &&
                     torrent.FinishedAction == TorrentFinishedAction.None &&
                     torrent.FinishedActionDelay == 4 &&
