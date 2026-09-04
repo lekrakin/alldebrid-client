@@ -25,7 +25,7 @@ function Get-ServiceEnvironmentValues([string]$Name) {
     $values = [Collections.Generic.Dictionary[string, string]]::new(
         [StringComparer]::OrdinalIgnoreCase)
 
-    foreach ($settingName in @("Port", "BasePath", "BASE_PATH")) {
+    foreach ($settingName in @("Port", "BasePath", "BASE_PATH", "DataPath", "Database__Path", "Logging__File__Path")) {
         $machineValue = [Environment]::GetEnvironmentVariable(
             $settingName,
             [EnvironmentVariableTarget]::Machine)
@@ -64,6 +64,38 @@ function Get-CommandLineSetting([string]$PathName, [string]$Name) {
     }
 
     return $match.Groups["plain"].Value
+}
+
+function Get-ConfiguredValue($Settings, [string]$Key, $DefaultValue, $EnvironmentValues, [string]$PathName) {
+    $commandLineValue = Get-CommandLineSetting $PathName $Key
+    if ($null -ne $commandLineValue) {
+        return $commandLineValue
+    }
+
+    $environmentName = $Key.Replace(':', '__')
+    if ($EnvironmentValues.ContainsKey($environmentName)) {
+        return $EnvironmentValues[$environmentName]
+    }
+
+    $configuredValue = $Settings
+    foreach ($segment in $Key.Split(':')) {
+        if ($null -eq $configuredValue) {
+            return $DefaultValue
+        }
+
+        $property = $configuredValue.PSObject.Properties[$segment]
+        if ($null -eq $property) {
+            return $DefaultValue
+        }
+
+        $configuredValue = $property.Value
+    }
+
+    if ($null -eq $configuredValue) {
+        return $DefaultValue
+    }
+
+    return $configuredValue.ToString()
 }
 
 function Get-ServiceHealthUri([string]$SettingsPath, [string]$Name) {
@@ -140,6 +172,14 @@ function Resolve-ConfiguredPath([string]$Path, [string]$BasePath) {
     }
 
     return [System.IO.Path]::GetFullPath((Join-Path $BasePath $Path))
+}
+
+function Assert-PersistentPathsOutsideApplication([string[]]$PersistentPaths, [string]$ApplicationDirectory) {
+    foreach ($persistentPath in $PersistentPaths) {
+        if (Test-SameOrDescendantPath $ApplicationDirectory $persistentPath) {
+            throw "Persistent data path is inside the replaceable application directory. Move it outside $ApplicationDirectory before deploying: $persistentPath"
+        }
+    }
 }
 
 function Get-ManagedServiceState([string]$Name) {
@@ -270,26 +310,26 @@ try {
     throw "Startup configuration is not valid JSON: $currentSettingsPath"
 }
 
-if ([string]::IsNullOrWhiteSpace($currentSettings.DataPath)) {
-    throw "The installed startup configuration does not define DataPath: $currentSettingsPath"
+$serviceEnvironment = Get-ServiceEnvironmentValues $ServiceName
+$configuredDataPath = Get-ConfiguredValue $currentSettings 'DataPath' './data' $serviceEnvironment $service.PathName
+if ([string]::IsNullOrWhiteSpace($configuredDataPath)) {
+    throw "The service's effective DataPath must not be blank."
 }
 
-$dataDirectory = Resolve-ConfiguredPath $currentSettings.DataPath $appDirectory
+$dataDirectory = Resolve-ConfiguredPath $configuredDataPath.Trim() $appDirectory
 $persistentPaths = @($dataDirectory)
 
-if (-not [string]::IsNullOrWhiteSpace($currentSettings.Database.Path)) {
-    $persistentPaths += Resolve-ConfiguredPath $currentSettings.Database.Path $dataDirectory
+$configuredDatabasePath = Get-ConfiguredValue $currentSettings 'Database:Path' $null $serviceEnvironment $service.PathName
+if (-not [string]::IsNullOrWhiteSpace($configuredDatabasePath)) {
+    $persistentPaths += Resolve-ConfiguredPath $configuredDatabasePath.Trim() $dataDirectory
 }
 
-if (-not [string]::IsNullOrWhiteSpace($currentSettings.Logging.File.Path)) {
-    $persistentPaths += Resolve-ConfiguredPath $currentSettings.Logging.File.Path $dataDirectory
+$configuredLogPath = Get-ConfiguredValue $currentSettings 'Logging:File:Path' $null $serviceEnvironment $service.PathName
+if (-not [string]::IsNullOrWhiteSpace($configuredLogPath)) {
+    $persistentPaths += Resolve-ConfiguredPath $configuredLogPath.Trim() $dataDirectory
 }
 
-foreach ($persistentPath in $persistentPaths) {
-    if (Test-SameOrDescendantPath $appDirectory $persistentPath) {
-        throw "Persistent data path is inside the replaceable application directory. Move it outside $appDirectory before deploying: $persistentPath"
-    }
-}
+Assert-PersistentPathsOutsideApplication $persistentPaths $appDirectory
 
 if ([string]::IsNullOrWhiteSpace($Version)) {
     $Version = (Get-Content -LiteralPath (Join-Path $projectRoot "version.txt") -Raw).Trim()

@@ -77,7 +77,7 @@ function Get-ServiceEnvironmentValues([string]$Name) {
     $values = [Collections.Generic.Dictionary[string, string]]::new(
         [StringComparer]::OrdinalIgnoreCase)
 
-    foreach ($settingName in @("Port", "BasePath", "BASE_PATH")) {
+    foreach ($settingName in @("Port", "BasePath", "BASE_PATH", "DataPath", "Database__Path", "Logging__File__Path")) {
         $machineValue = [Environment]::GetEnvironmentVariable(
             $settingName,
             [EnvironmentVariableTarget]::Machine)
@@ -127,11 +127,15 @@ function Test-SameOrDescendant([string]$Parent, [string]$Child) {
            $normalizedChild.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)
 }
 
-function Get-ConfiguredValue($Settings, [string]$Key, $DefaultValue) {
+function Get-ConfiguredValue($Settings, [string]$Key, $DefaultValue, $EnvironmentValues, [string]$PathName) {
+    $commandLineValue = Get-CommandLineSetting $PathName $Key
+    if ($null -ne $commandLineValue) {
+        return $commandLineValue
+    }
+
     $environmentName = $Key.Replace(':', '__')
-    $environmentValue = [Environment]::GetEnvironmentVariable($environmentName)
-    if ($null -ne $environmentValue) {
-        return $environmentValue
+    if ($EnvironmentValues.ContainsKey($environmentName)) {
+        return $EnvironmentValues[$environmentName]
     }
 
     $configuredValue = $Settings
@@ -199,18 +203,18 @@ function Resolve-ConfiguredFilePath(
     return $resolvedPath
 }
 
-function Get-PersistentPaths($Settings, [string]$ApplicationDirectory) {
+function Get-PersistentPaths($Settings, [string]$ApplicationDirectory, $EnvironmentValues, [string]$PathName) {
     $dataPath = Resolve-ConfiguredPath `
-        (Get-ConfiguredValue $Settings 'DataPath' './data') `
+        (Get-ConfiguredValue $Settings 'DataPath' './data' $EnvironmentValues $PathName) `
         $ApplicationDirectory `
         'DataPath'
     $databasePath = Resolve-ConfiguredFilePath `
-        (Get-ConfiguredValue $Settings 'Database:Path' $null) `
+        (Get-ConfiguredValue $Settings 'Database:Path' $null $EnvironmentValues $PathName) `
         $dataPath `
         'Database:Path' `
         'adbclient.db'
     $logPath = Resolve-ConfiguredFilePath `
-        (Get-ConfiguredValue $Settings 'Logging:File:Path' $null) `
+        (Get-ConfiguredValue $Settings 'Logging:File:Path' $null $EnvironmentValues $PathName) `
         $dataPath `
         'Logging:File:Path' `
         'adbclient.log'
@@ -222,8 +226,8 @@ function Get-PersistentPaths($Settings, [string]$ApplicationDirectory) {
     )
 }
 
-function Assert-PersistentPathsOutsideApplication($Settings, [string]$ApplicationDirectory) {
-    foreach ($persistentPath in (Get-PersistentPaths $Settings $ApplicationDirectory)) {
+function Assert-PersistentPathsOutsideApplication($Settings, [string]$ApplicationDirectory, $EnvironmentValues, [string]$PathName) {
+    foreach ($persistentPath in (Get-PersistentPaths $Settings $ApplicationDirectory $EnvironmentValues $PathName)) {
         if (Test-SameOrDescendant $ApplicationDirectory $persistentPath.Path) {
             throw "$($persistentPath.Name) '$($persistentPath.Path)' is inside the application directory. Move persistent data outside '$ApplicationDirectory' before using in-place updates."
         }
@@ -590,7 +594,8 @@ try {
     }
 
     $settings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
-    Assert-PersistentPathsOutsideApplication $settings $ApplicationDirectory
+    $serviceEnvironment = Get-ServiceEnvironmentValues $ServiceName
+    Assert-PersistentPathsOutsideApplication $settings $ApplicationDirectory $serviceEnvironment $service.PathName
 
     $currentVersion = Get-ApplicationVersion $ApplicationDirectory
     $release = Get-LatestRelease
