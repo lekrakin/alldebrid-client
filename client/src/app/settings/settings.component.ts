@@ -1,4 +1,4 @@
-import { NgClass, KeyValuePipe } from '@angular/common';
+import { APP_BASE_HREF, KeyValuePipe, NgClass } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
@@ -17,6 +17,7 @@ import { Nl2BrPipe } from '../nl2br.pipe';
   standalone: true,
 })
 export class SettingsComponent implements OnInit {
+  private baseHref = inject(APP_BASE_HREF);
   private settingsService = inject(SettingsService);
   private authService = inject(AuthService);
 
@@ -263,7 +264,8 @@ export class SettingsComponent implements OnInit {
     this.magnetHandlerError = null;
 
     try {
-      navigator.registerProtocolHandler('magnet', `${window.location.origin}/add?magnet=%s`);
+      const handlerUrl = new URL(`${this.baseHref}add?magnet=%s`, window.location.origin);
+      navigator.registerProtocolHandler('magnet', handlerUrl.toString());
       this.magnetHandlerSuccess = true;
     } catch (error) {
       this.magnetHandlerError = this.getErrorMessage(error, 'Magnet link registration failed.');
