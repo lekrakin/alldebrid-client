@@ -54,13 +54,14 @@ export class SettingsComponent implements OnInit {
   public readonly testWriteSpeedError = signal<string | null>(null);
   public readonly testWriteSpeedSuccess = signal<number | null>(null);
 
-  public canRegisterMagnetHandler = false;
+  public readonly magnetHandlerNeedsHttps = !window.isSecureContext;
+  public readonly canRegisterMagnetHandler =
+    !this.magnetHandlerNeedsHttps && typeof navigator.registerProtocolHandler === 'function';
   public magnetHandlerSuccess = false;
   public magnetHandlerError: string = null;
 
   ngOnInit(): void {
     this.loadSettings();
-    this.canRegisterMagnetHandler = !!(window.isSecureContext && 'registerProtocolHandler' in navigator);
   }
 
   public loadSettings(): void {

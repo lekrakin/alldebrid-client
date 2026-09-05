@@ -176,14 +176,24 @@
                 (click)="registerMagnetHandler()"
                 [disabled]="!canRegisterMagnetHandler"
               >
-                {{ canRegisterMagnetHandler ? 'Register handler' : 'Unavailable in this browser' }}
+                @if (magnetHandlerNeedsHttps) {
+                  HTTPS required
+                } @else if (canRegisterMagnetHandler) {
+                  Register handler
+                } @else {
+                  Unsupported browser
+                }
               </button>
             </div>
             <p class="help">
-              @if (canRegisterMagnetHandler) {
+              @if (magnetHandlerNeedsHttps) {
+                Magnet-link registration requires a secure connection. Open AllDebrid Client over HTTPS to register a
+                handler. You can still add magnets manually or through connected applications.
+              } @else if (canRegisterMagnetHandler) {
                 Ask the browser to open magnet links in AllDebrid Client.
               } @else {
-                This browser does not support protocol registration here, or the client is not using a secure context.
+                This browser does not support registering magnet-link handlers. You can still add magnets manually or
+                through connected applications.
               }
             </p>
             @if (magnetHandlerError) {
