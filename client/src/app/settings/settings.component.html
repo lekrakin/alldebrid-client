@@ -167,56 +167,19 @@
         </div>
 
         @if (tab.key === 'General') {
-          <div class="field field-wide">
-            <label class="label">Magnet link handler</label>
-            <div class="control">
-              <button
-                class="button is-info"
-                type="button"
-                (click)="registerMagnetHandler()"
-                [disabled]="!canRegisterMagnetHandler"
-              >
-                @if (magnetHandlerNeedsHttps) {
-                  HTTPS required
-                } @else if (canRegisterMagnetHandler) {
-                  Register handler
-                } @else {
-                  Unsupported browser
-                }
-              </button>
-            </div>
-            <p class="help">
-              @if (magnetHandlerNeedsHttps) {
-                Magnet-link registration requires a secure connection. Open AllDebrid Client over HTTPS to register a
-                handler. You can still add magnets manually or through connected applications.
-              } @else if (canRegisterMagnetHandler) {
-                Ask the browser to open magnet links in AllDebrid Client.
-              } @else {
-                This browser does not support registering magnet-link handlers. You can still add magnets manually or
-                through connected applications.
-              }
-            </p>
-            @if (magnetHandlerError) {
-              <div class="notification is-danger is-light mt-3" role="alert">{{ magnetHandlerError }}</div>
-            }
-            @if (magnetHandlerSuccess) {
-              <div class="notification is-success is-light mt-3" role="status">
-                Registration requested. Confirm the browser prompt to finish.
-              </div>
-            }
-          </div>
+          <app-magnet-handler />
         }
 
         @if (settingsSaveError(); as settingsSaveError) {
           <div class="notification is-danger is-light" role="alert">{{ settingsSaveError }}</div>
         }
         @if (settingsSaveSuccess()) {
-          <div class="notification is-success is-light" role="status">Settings saved and reloaded.</div>
+          <div class="notification" role="status">Settings saved and reloaded.</div>
         }
 
         <div class="settings-actions">
           <button
-            class="button is-success"
+            class="button is-primary"
             type="button"
             (click)="saveSettings()"
             [disabled]="settingsSaving()"
@@ -239,7 +202,7 @@
           <h3 class="title is-6">Download path</h3>
           <p class="help mb-4">Checks whether the local path currently shown under Storage is writable.</p>
           <button
-            class="button is-warning"
+            class="button"
             type="button"
             (click)="testDownloadPath()"
             [disabled]="pathTesting()"
@@ -251,7 +214,7 @@
             <div class="notification is-danger is-light mt-4" role="alert">{{ testPathError }}</div>
           }
           @if (testPathSuccess()) {
-            <div class="notification is-success is-light mt-4" role="status">Download path is writable.</div>
+            <div class="notification mt-4" role="status">Download path is writable.</div>
           }
         </article>
 
@@ -259,7 +222,7 @@
           <h3 class="title is-6">Internet download speed</h3>
           <p class="help mb-4">Downloads up to 50 MB from Cloudflare and removes the test file afterward.</p>
           <button
-            class="button is-warning"
+            class="button"
             type="button"
             (click)="testDownloadSpeed()"
             [disabled]="downloadSpeedTesting()"
@@ -271,7 +234,7 @@
             <div class="notification is-danger is-light mt-4" role="alert">{{ testDownloadSpeedError }}</div>
           }
           @if (testDownloadSpeedSuccess() !== null) {
-            <div class="notification is-success is-light mt-4" role="status">
+            <div class="notification mt-4" role="status">
               Download speed: {{ testDownloadSpeedSuccess() | filesize }}/s
             </div>
           }
@@ -281,7 +244,7 @@
           <h3 class="title is-6">Disk write speed</h3>
           <p class="help mb-4">Writes 64 MB to the saved local download path and removes the test file afterward.</p>
           <button
-            class="button is-warning"
+            class="button"
             type="button"
             (click)="testWriteSpeed()"
             [disabled]="writeSpeedTesting()"
@@ -293,9 +256,7 @@
             <div class="notification is-danger is-light mt-4" role="alert">{{ testWriteSpeedError }}</div>
           }
           @if (testWriteSpeedSuccess() !== null) {
-            <div class="notification is-success is-light mt-4" role="status">
-              Write speed: {{ testWriteSpeedSuccess() | filesize }}/s
-            </div>
+            <div class="notification mt-4" role="status">Write speed: {{ testWriteSpeedSuccess() | filesize }}/s</div>
           }
         </article>
       </div>
@@ -346,11 +307,11 @@
           <div class="notification is-danger is-light" role="alert">{{ profileError }}</div>
         }
         @if (profileSuccess()) {
-          <div class="notification is-success is-light" role="status">Account credentials saved.</div>
+          <div class="notification" role="status">Account credentials saved.</div>
         }
 
         <button
-          class="button is-success"
+          class="button is-primary"
           type="button"
           (click)="saveProfile()"
           [disabled]="profileSaving() || (!profileUsername() && !profilePassword())"

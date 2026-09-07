@@ -1,4 +1,4 @@
-import { APP_BASE_HREF, KeyValuePipe, NgClass } from '@angular/common';
+import { KeyValuePipe, NgClass } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
@@ -8,16 +8,16 @@ import { AuthService } from '../auth.service';
 import { FileSizePipe } from '../filesize.pipe';
 import { Setting } from '../models/setting.model';
 import { Nl2BrPipe } from '../nl2br.pipe';
+import { MagnetHandlerComponent } from './magnet-handler/magnet-handler.component';
 
 @Component({
   selector: 'app-settings',
   templateUrl: './settings.component.html',
   styleUrls: ['./settings.component.scss'],
-  imports: [NgClass, FormsModule, KeyValuePipe, Nl2BrPipe, FileSizePipe],
+  imports: [NgClass, FormsModule, KeyValuePipe, Nl2BrPipe, FileSizePipe, MagnetHandlerComponent],
   standalone: true,
 })
 export class SettingsComponent implements OnInit {
-  private baseHref = inject(APP_BASE_HREF);
   private settingsService = inject(SettingsService);
   private authService = inject(AuthService);
 
@@ -53,12 +53,6 @@ export class SettingsComponent implements OnInit {
   public readonly writeSpeedTesting = signal(false);
   public readonly testWriteSpeedError = signal<string | null>(null);
   public readonly testWriteSpeedSuccess = signal<number | null>(null);
-
-  public readonly magnetHandlerNeedsHttps = !window.isSecureContext;
-  public readonly canRegisterMagnetHandler =
-    !this.magnetHandlerNeedsHttps && typeof navigator.registerProtocolHandler === 'function';
-  public magnetHandlerSuccess = false;
-  public magnetHandlerError: string = null;
 
   ngOnInit(): void {
     this.loadSettings();
@@ -260,19 +254,6 @@ export class SettingsComponent implements OnInit {
           this.profileSuccess.set(false);
         },
       });
-  }
-
-  public registerMagnetHandler(): void {
-    this.magnetHandlerSuccess = false;
-    this.magnetHandlerError = null;
-
-    try {
-      const handlerUrl = new URL(`${this.baseHref}add?magnet=%s`, window.location.origin);
-      navigator.registerProtocolHandler('magnet', handlerUrl.toString());
-      this.magnetHandlerSuccess = true;
-    } catch (error) {
-      this.magnetHandlerError = this.getErrorMessage(error, 'Magnet link registration failed.');
-    }
   }
 
   private getErrorMessage(error: unknown, fallback: string): string {

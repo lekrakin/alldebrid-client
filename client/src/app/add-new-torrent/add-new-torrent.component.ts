@@ -46,9 +46,12 @@ export class AddNewTorrentComponent implements OnInit {
   private selectedFile: File;
 
   ngOnInit(): void {
-    this.activatedRoute.queryParams.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
-      if (params['magnet']) {
-        this.magnetLink.set(decodeURIComponent(params['magnet']));
+    this.activatedRoute.queryParamMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
+      const magnet = params.get('magnet');
+
+      if (magnet) {
+        // The router already decoded the handler parameter; preserve encoding inside the magnet itself.
+        this.magnetLink.set(magnet);
       }
     });
     this.settingsService
