@@ -32,14 +32,6 @@
       </div>
     </div>
 
-    <div class="field">
-      <div class="control">
-        <button class="button is-primary" [disabled]="saving()" [ngClass]="{ 'is-loading': saving() }" (click)="ok()">
-          <span>Add Torrent</span>
-        </button>
-      </div>
-    </div>
-
     <div class="separator">Advanced settings</div>
 
     <div class="field">
@@ -226,18 +218,11 @@
   </div>
 </div>
 
-<div class="field">
-  <div class="control">
-    @if (error(); as error) {
-      <div class="notification is-danger is-light">{{ error }}</div>
-    }
-  </div>
-</div>
-
-<div class="field">
-  <div class="control">
-    <button class="button is-primary" [disabled]="saving()" [ngClass]="{ 'is-loading': saving() }" (click)="ok()">
-      <span>Add Torrent</span>
-    </button>
-  </div>
+<div class="buttons page-actions" role="group" aria-label="New torrent actions">
+  <button class="button is-primary" [disabled]="saving()" [ngClass]="{ 'is-loading': saving() }" (click)="ok()">
+    <span>Add Torrent</span>
+  </button>
+  @if (error(); as error) {
+    <p class="help is-danger" role="alert">{{ error }}</p>
+  }
 </div>

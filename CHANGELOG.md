@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Use a shared orange-accent dark theme and standard buttons while preserving premium status colors.
 - Sort torrent counts correctly without mutating live data, and restrict bulk selection to matching rows.
 - Add resizable, single-line torrent columns, a wider list layout, and compact dates with full timestamp tooltips.
+- Keep settings, add-torrent, and torrent-management actions visible while scrolling, including save feedback.
 - Show external-client removal separately from download status without changing categories or assuming an import succeeded.
 - Remove seeder tracking and seeder-based stalled states; use AllDebrid's reported download state instead.
 - Preserve encoded trackers and literal percent signs when opening magnet links.

@@ -170,14 +170,7 @@
           <app-magnet-handler />
         }
 
-        @if (settingsSaveError(); as settingsSaveError) {
-          <div class="notification is-danger is-light" role="alert">{{ settingsSaveError }}</div>
-        }
-        @if (settingsSaveSuccess()) {
-          <div class="notification" role="status">Settings saved and reloaded.</div>
-        }
-
-        <div class="settings-actions">
+        <div class="buttons page-actions" role="group" aria-label="Settings actions">
           <button
             class="button is-primary"
             type="button"
@@ -187,6 +180,12 @@
           >
             Save settings
           </button>
+          @if (settingsSaveError(); as settingsSaveError) {
+            <p class="help is-danger" role="alert">{{ settingsSaveError }}</p>
+          }
+          @if (settingsSaveSuccess()) {
+            <p class="help" role="status">Settings saved and reloaded.</p>
+          }
         </div>
       </section>
     }
@@ -303,22 +302,23 @@
           <p class="help">For an existing account, leave blank to keep the current password.</p>
         </div>
 
-        @if (profileError(); as profileError) {
-          <div class="notification is-danger is-light" role="alert">{{ profileError }}</div>
-        }
-        @if (profileSuccess()) {
-          <div class="notification" role="status">Account credentials saved.</div>
-        }
-
-        <button
-          class="button is-primary"
-          type="button"
-          (click)="saveProfile()"
-          [disabled]="profileSaving() || (!profileUsername() && !profilePassword())"
-          [ngClass]="{ 'is-loading': profileSaving() }"
-        >
-          Save account
-        </button>
+        <div class="buttons page-actions" role="group" aria-label="Account actions">
+          <button
+            class="button is-primary"
+            type="button"
+            (click)="saveProfile()"
+            [disabled]="profileSaving() || (!profileUsername() && !profilePassword())"
+            [ngClass]="{ 'is-loading': profileSaving() }"
+          >
+            Save account
+          </button>
+          @if (profileError(); as profileError) {
+            <p class="help is-danger" role="alert">{{ profileError }}</p>
+          }
+          @if (profileSuccess()) {
+            <p class="help" role="status">Account credentials saved.</p>
+          }
+        </div>
       </div>
     </section>
   }

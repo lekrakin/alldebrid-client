@@ -128,8 +128,8 @@
   </table>
 </div>
 
-<div class="buttons" role="group" aria-label="Selected torrent actions">
-  @if (torrentItems.length > 0) {
+@if (torrentItems.length > 0) {
+  <div class="buttons page-actions" role="group" aria-label="Selected torrent actions">
     <button class="button is-danger" (click)="showDeleteModal()" [disabled]="selectedTorrentIds.length === 0">
       Delete Selected
     </button>
@@ -141,11 +141,9 @@
     </button>
     @if (selectedTorrentIds.length > 0) {
       <button class="button is-ghost" type="button" (click)="selectedTorrents.set([])">Clear selection</button>
+      <span class="help" role="status">{{ selectedTorrentIds.length }} selected across all filters.</span>
     }
-  }
-</div>
-@if (selectedTorrentIds.length > 0) {
-  <p class="help" role="status">{{ selectedTorrentIds.length }} selected across all filters.</p>
+  </div>
 }
 
 <div class="modal" [class.is-active]="isDeleteModalActive()">

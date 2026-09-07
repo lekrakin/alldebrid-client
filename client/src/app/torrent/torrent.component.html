@@ -25,11 +25,6 @@
     @if (activeTab === 0) {
       <div class="flex-container">
         <div style="flex: 1 1 0">
-          <div class="buttons">
-            <button class="button is-danger" (click)="showDeleteModal()">Delete Torrent</button>
-            <button class="button" (click)="showRetryModal()">Retry Torrent</button>
-            <button class="button" (click)="showUpdateSettingsModal()">Change Settings</button>
-          </div>
           <div class="field">
             <label class="label">Status</label>
             {{ torrent | status }}
@@ -408,6 +403,11 @@
         </div>
       </div>
     }
+  </div>
+  <div class="buttons page-actions" role="group" aria-label="Torrent actions">
+    <button class="button is-danger" (click)="showDeleteModal()">Delete Torrent</button>
+    <button class="button" (click)="showRetryModal()">Retry Torrent</button>
+    <button class="button" (click)="showUpdateSettingsModal()">Change Settings</button>
   </div>
 }
 
