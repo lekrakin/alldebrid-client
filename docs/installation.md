@@ -55,7 +55,7 @@ Download, verify, and inspect the latest package without changing the installati
 
 Running the updater again when the current release is installed makes no changes. Use `-Force` only to reinstall that same release.
 
-Repository maintainers with a checkout and the standard `<install-root>\App`, `Data`, and `Backups` layout can use `deploy.ps1` from an Administrator PowerShell session. It builds into staging, preserves configuration and data, retains the previous application directory, and rolls back when the restarted service fails its health check.
+Repository maintainers with a checkout, the build prerequisites, and the standard `<install-root>\App`, `Data`, and `Backups` layout can deploy the current source with `./deploy.ps1` from a normal PowerShell session. The script discovers the installation from the service, asks for confirmation, and requests Windows administrator approval when needed. Build output and errors stay in the original terminal; no separate deployment wrapper is needed. It builds before stopping the service, preserves configuration and data, retains the previous application directory, and rolls back when the restarted service fails its health check. A stopped service remains stopped. Use `./deploy.ps1 -WhatIf` for a read-only preflight with no build, staging files, or administrator prompt. Windows requires approval for each new elevated process; the script does not disable UAC or install a background updater. This source deployment is separate from `update.cmd`, which installs published releases only.
 
 ## Native Linux service
 

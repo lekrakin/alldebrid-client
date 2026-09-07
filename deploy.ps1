@@ -4,12 +4,89 @@ param(
     [ValidatePattern('^[A-Za-z0-9_.-]+$')]
     [string]$ServiceName = "AllDebridClient",
     [ValidatePattern('^\d+\.\d+\.\d+$')]
-    [string]$Version
+    [string]$Version,
+    [Parameter(DontShow)]
+    [switch]$Elevated
 )
 
 $ErrorActionPreference = "Stop"
 $PSNativeCommandUseErrorActionPreference = $true
 $projectRoot = [System.IO.Path]::GetFullPath($PSScriptRoot).TrimEnd('\', '/')
+
+function Test-IsAdministrator {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function ConvertTo-SingleQuotedLiteral([string]$Value) {
+    return "'" + $Value.Replace("'", "''") + "'"
+}
+
+function Get-ElevatedDeploymentCommand([string]$ScriptPath, [string]$Root, [string]$Name, [string]$BuildVersion, [string]$OutputPath) {
+    $invocation = @(
+        '&', (ConvertTo-SingleQuotedLiteral $ScriptPath),
+        '-Elevated -Confirm:$false',
+        '-InstallRoot', (ConvertTo-SingleQuotedLiteral $Root),
+        '-ServiceName', (ConvertTo-SingleQuotedLiteral $Name),
+        '-Version', (ConvertTo-SingleQuotedLiteral $BuildVersion)
+    ) -join ' '
+    $outputLiteral = ConvertTo-SingleQuotedLiteral $OutputPath
+
+    return @"
+`$ErrorActionPreference = 'Stop'
+& {
+    try {
+        $invocation
+        exit 0
+    } catch {
+        `$_ | Out-String
+        exit 1
+    }
+} *> $outputLiteral
+"@
+}
+
+function Start-ElevatedDeployment([string]$ScriptPath, [string]$Root, [string]$Name, [string]$BuildVersion) {
+    # Windows cannot redirect an elevated process's streams directly. Relay its output
+    # through one temporary file; no helper script or permanent privileged task is needed.
+    $outputPath = [IO.Path]::GetTempFileName()
+    $reader = $null
+    $process = $null
+    try {
+        $command = Get-ElevatedDeploymentCommand $ScriptPath $Root $Name $BuildVersion $outputPath
+        $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
+        $powerShell = Join-Path $PSHOME $(if ($PSVersionTable.PSEdition -eq 'Core') { 'pwsh.exe' } else { 'powershell.exe' })
+        Write-Host '==> Approve the Windows administrator prompt to deploy. Build output will appear here.'
+        try {
+            $process = Start-Process -FilePath $powerShell `
+                                     -ArgumentList "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encodedCommand" `
+                                     -WorkingDirectory (Split-Path -Parent $ScriptPath) `
+                                     -Verb RunAs -WindowStyle Hidden -PassThru
+        } catch {
+            throw "Could not start deployment with administrator approval: $($_.Exception.Message)"
+        }
+
+        do {
+            $hasExited = $process.WaitForExit(250)
+            if ($null -eq $reader -and (Get-Item -LiteralPath $outputPath).Length -gt 0) {
+                $stream = [IO.File]::Open($outputPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+                $reader = [IO.StreamReader]::new($stream, [Text.Encoding]::UTF8, $true)
+            }
+            if ($null -ne $reader) {
+                while (-not $reader.EndOfStream) { Write-Host $reader.ReadLine() }
+            }
+        } while (-not $hasExited)
+
+        if ($process.ExitCode -ne 0) {
+            throw "Elevated deployment failed (exit code $($process.ExitCode)). See the output above."
+        }
+    } finally {
+        if ($null -ne $reader) { $reader.Dispose() }
+        if ($null -ne $process) { $process.Dispose() }
+        Remove-Item -LiteralPath $outputPath -Force
+    }
+}
 
 function Get-ServiceApplicationPath([string]$PathName) {
     $tokens = [regex]::Matches($PathName, '"([^"]+)"|(\S+)') | ForEach-Object {
@@ -251,11 +328,6 @@ function Wait-ForHealth([string]$ServiceName, [string]$Uri) {
     throw "The service did not become healthy at $Uri within 45 seconds. Last error: $lastError"
 }
 
-$principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
-if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    throw "Run this deployment from an Administrator PowerShell session."
-}
-
 $service = Get-CimInstance Win32_Service -Filter "Name='$ServiceName'" -ErrorAction SilentlyContinue
 if ($null -eq $service) {
     throw "Windows service '$ServiceName' was not found. Install it before using the in-place deployment command."
@@ -351,6 +423,18 @@ if ($initialServiceState -eq "Start Pending") {
 }
 
 $wasRunning = $initialServiceState -eq "Running"
+if (-not $PSCmdlet.ShouldProcess($appDirectory, "Build version $Version, stop $ServiceName, back up and replace App, and restore the service's running state")) {
+    return
+}
+
+if (-not (Test-IsAdministrator)) {
+    if ($Elevated) {
+        throw "The elevated process did not receive administrator rights. No deployment was performed."
+    }
+    Start-ElevatedDeployment $PSCommandPath $InstallRoot $ServiceName $Version
+    return
+}
+
 $backupDirectory = [System.IO.Path]::GetFullPath((Join-Path $backupsDirectory "App-$((Get-Date).ToString('yyyyMMdd-HHmmss'))-$([Guid]::NewGuid().ToString('N').Substring(0, 8))"))
 $failedDirectory = [System.IO.Path]::GetFullPath((Join-Path $backupsDirectory "Failed-$((Get-Date).ToString('yyyyMMdd-HHmmss'))-$([Guid]::NewGuid().ToString('N').Substring(0, 8))"))
 Assert-ChildPath $backupsDirectory $backupDirectory
@@ -363,10 +447,6 @@ try {
     & (Join-Path $projectRoot "publish.ps1") -InstallPath $stagingDirectory -DataPath $dataDirectory -Version $Version
 
     Copy-Item -LiteralPath $currentSettingsPath -Destination (Join-Path $stagingDirectory "appsettings.json") -Force
-
-    if (-not $PSCmdlet.ShouldProcess($appDirectory, "Stop $ServiceName, back up the current App directory, deploy version $Version, and restart")) {
-        return
-    }
 
     New-Item -ItemType Directory -Path $backupsDirectory -Force | Out-Null
 
