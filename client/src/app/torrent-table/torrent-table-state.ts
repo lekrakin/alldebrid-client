@@ -4,7 +4,6 @@ export const torrentColumns = [
   { key: 'rdName', label: 'Name', value: (torrent: Torrent) => torrent.rdName },
   { key: 'category', label: 'Category', value: (torrent: Torrent) => torrent.category },
   { key: 'priority', label: 'Priority', value: (torrent: Torrent) => torrent.priority },
-  { key: 'rdSeeders', label: 'Seeders', value: (torrent: Torrent) => torrent.rdSeeders },
   { key: 'files.length', label: 'Files', value: (torrent: Torrent) => torrent.files.length },
   { key: 'downloads.length', label: 'Downloads', value: (torrent: Torrent) => torrent.downloads.length },
   { key: 'rdSize', label: 'Size', value: (torrent: Torrent) => torrent.rdSize },
@@ -18,6 +17,57 @@ export const torrentColumns = [
 
 export type TorrentSortKey = (typeof torrentColumns)[number]['key'];
 export type SortDirection = 'asc' | 'desc';
+
+export const selectionColumnWidth = 44;
+export const maxColumnWidth = 16384;
+
+const columnSizes = {
+  rdName: { width: 320, min: 240 },
+  category: { width: 140, min: 104 },
+  priority: { width: 110, min: 110 },
+  'files.length': { width: 88, min: 88 },
+  'downloads.length': { width: 148, min: 148 },
+  rdSize: { width: 112, min: 96 },
+  added: { width: 148, min: 136 },
+  rdStatus: { width: 176, min: 112 },
+} satisfies Record<TorrentSortKey, { width: number; min: number }>;
+
+export function torrentColumnLayout(containerWidth: number, overrides: Partial<Record<TorrentSortKey, number>>) {
+  const columns = torrentColumns.map((column) => {
+    const { width, min } = columnSizes[column.key];
+    return {
+      ...column,
+      width: Math.max(min, Math.min(maxColumnWidth, overrides[column.key] ?? width)),
+      minWidth: min,
+    };
+  });
+  const name = columns[0];
+  if (overrides.rdName === undefined) {
+    const otherWidth = selectionColumnWidth + columns.slice(1).reduce((total, column) => total + column.width, 0);
+    name.width = Math.min(maxColumnWidth, Math.max(columnSizes.rdName.width, containerWidth - otherWidth));
+  }
+  return {
+    columns,
+    width: selectionColumnWidth + columns.reduce((total, column) => total + column.width, 0),
+  };
+}
+
+export function resizeTorrentColumn(
+  widths: Partial<Record<TorrentSortKey, number>>,
+  layout: ReturnType<typeof torrentColumnLayout>,
+  key: TorrentSortKey,
+  width: number | null
+): Partial<Record<TorrentSortKey, number>> {
+  const next = { ...widths };
+  if (width === null) {
+    delete next[key];
+  } else {
+    // Freeze the flexible column so the dragged edge follows the pointer.
+    next.rdName ??= layout.columns[0].width;
+    next[key] = width;
+  }
+  return next;
+}
 
 const nameComparer = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 

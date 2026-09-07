@@ -1,4 +1,14 @@
-import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import {
+  Component,
+  DestroyRef,
+  ElementRef,
+  OnInit,
+  afterNextRender,
+  computed,
+  inject,
+  signal,
+  viewChild,
+} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
 import { Torrent } from '../models/torrent.model';
@@ -8,10 +18,14 @@ import { FormsModule } from '@angular/forms';
 import { NgClass, DecimalPipe, DatePipe } from '@angular/common';
 import { TorrentStatusPipe } from '../torrent-status.pipe';
 import { FileSizePipe } from '../filesize.pipe';
+import { ColumnResizeDirective } from '../shared/column-resize/column-resize.directive';
 import {
+  maxColumnWidth,
   pruneTorrentSelection,
+  resizeTorrentColumn,
+  selectionColumnWidth,
   selectVisibleTorrents,
-  torrentColumns,
+  torrentColumnLayout,
   visibleSelectionState,
   visibleTorrents,
   type SortDirection,
@@ -22,16 +36,33 @@ import {
   selector: 'app-torrent-table',
   templateUrl: './torrent-table.component.html',
   styleUrls: ['./torrent-table.component.scss'],
-  imports: [FormsModule, NgClass, DecimalPipe, DatePipe, TorrentStatusPipe, FileSizePipe, RouterLink],
+  imports: [
+    FormsModule,
+    NgClass,
+    DecimalPipe,
+    DatePipe,
+    TorrentStatusPipe,
+    FileSizePipe,
+    RouterLink,
+    ColumnResizeDirective,
+  ],
   standalone: true,
 })
 export class TorrentTableComponent implements OnInit {
   private torrentService = inject(TorrentService);
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly tableContainer = viewChild.required<ElementRef<HTMLElement>>('tableContainer');
+  private readonly containerWidth = signal(0);
+  private readonly columnWidths = signal<Partial<Record<TorrentSortKey, number>>>({});
 
   public readonly torrents = signal<Torrent[]>([]);
+  public readonly loading = signal(true);
   public readonly selectedTorrents = signal<string[]>([]);
   public readonly error = signal<string | null>(null);
-  public readonly sortColumns = torrentColumns;
+  public readonly selectionColumnWidth = selectionColumnWidth;
+  public readonly maxColumnWidth = maxColumnWidth;
+  public readonly columnLayout = computed(() => torrentColumnLayout(this.containerWidth(), this.columnWidths()));
+  public readonly columnsResized = computed(() => Object.keys(this.columnWidths()).length > 0);
   public readonly sortProperty = signal<TorrentSortKey>('rdName');
   public readonly sortDirection = signal<SortDirection>('asc');
   public readonly filterText = signal('');
@@ -70,6 +101,11 @@ export class TorrentTableComponent implements OnInit {
   public updateSettingsTorrentLifetime: number;
 
   constructor() {
+    afterNextRender(() => {
+      const observer = new ResizeObserver(([entry]) => this.containerWidth.set(Math.floor(entry.contentRect.width)));
+      observer.observe(this.tableContainer().nativeElement);
+      this.destroyRef.onDestroy(() => observer.disconnect());
+    });
     this.torrentService.update$.pipe(takeUntilDestroyed()).subscribe((result) => {
       this.setTorrents(result);
     });
@@ -81,14 +117,25 @@ export class TorrentTableComponent implements OnInit {
         this.setTorrents(result);
       },
       error: (err) => {
-        this.error.set(err.error);
+        this.loading.set(false);
+        this.error.set(typeof err.error === 'string' ? err.error : 'The torrent list could not be loaded.');
       },
     });
   }
 
   private setTorrents(torrents: Torrent[]): void {
+    this.loading.set(false);
+    this.error.set(null);
     this.torrents.set(torrents);
     this.selectedTorrents.update((selectedIds) => pruneTorrentSelection(selectedIds, torrents));
+  }
+
+  public resizeColumn(key: TorrentSortKey, width: number | null): void {
+    this.columnWidths.update((widths) => resizeTorrentColumn(widths, this.columnLayout(), key, width));
+  }
+
+  public resetColumns(): void {
+    this.columnWidths.set({});
   }
 
   public sort(property: TorrentSortKey): void {

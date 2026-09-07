@@ -1,4 +1,4 @@
-import { Component } from '@angular/core';
+import { Component, signal } from '@angular/core';
 import { NavbarComponent } from '../navbar/navbar.component';
 import { RouterOutlet } from '@angular/router';
 
@@ -10,5 +10,5 @@ import { RouterOutlet } from '@angular/router';
   standalone: true,
 })
 export class MainLayoutComponent {
-  constructor() {}
+  public readonly wideContent = signal(false);
 }

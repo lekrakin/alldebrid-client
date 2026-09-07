@@ -33,6 +33,7 @@ const routes: Routes = [
       {
         path: 'torrents',
         component: TorrentTableComponent,
+        data: { wide: true },
       },
       {
         path: 'index.html',

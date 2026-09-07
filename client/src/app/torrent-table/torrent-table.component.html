@@ -1,5 +1,6 @@
 @let torrentItems = torrents();
 @let selectedTorrentIds = selectedTorrents();
+@let layout = columnLayout();
 
 @if (error(); as error) {
   <div class="notification is-danger is-light">
@@ -26,10 +27,21 @@
       </button>
     </div>
   }
+  @if (columnsResized()) {
+    <div class="control">
+      <button class="button" type="button" (click)="resetColumns()">Reset columns</button>
+    </div>
+  }
 </div>
 
-<div class="table-container">
-  <table class="table is-fullwidth is-hoverable" aria-label="Torrents">
+<div class="table-container" #tableContainer>
+  <table class="table is-hoverable" aria-label="Torrents" [attr.aria-busy]="loading()" [style.width.px]="layout.width">
+    <colgroup>
+      <col [style.width.px]="selectionColumnWidth" />
+      @for (column of layout.columns; track column.key) {
+        <col [style.width.px]="column.width" />
+      }
+    </colgroup>
     <thead>
       <tr>
         <th>
@@ -42,17 +54,27 @@
             [disabled]="visibleTorrents().length === 0"
           />
         </th>
-        @for (column of sortColumns; track column.key) {
+        @for (column of layout.columns; track column.key) {
           <th scope="col" [attr.aria-sort]="sortAria(column.key)">
             <button class="sort-button" type="button" (click)="sort(column.key)">
               {{ column.label }} <i class="fas" [ngClass]="sortIcon(column.key)" aria-hidden="true"></i>
             </button>
+            <span
+              class="column-resize-handle"
+              appColumnResize
+              [columnLabel]="column.label"
+              [columnWidth]="column.width"
+              [minWidth]="column.minWidth"
+              [maxWidth]="maxColumnWidth"
+              (columnWidthChange)="resizeColumn(column.key, $event)"
+            ></span>
           </th>
         }
       </tr>
     </thead>
     <tbody>
       @for (torrent of visibleTorrents(); track torrent.torrentId) {
+        @let status = torrent | status;
         <tr>
           <td>
             <input
@@ -63,16 +85,13 @@
             />
           </td>
           <td class="torrent-name">
-            <a [routerLink]="['/torrent', torrent.torrentId]">{{ torrent.rdName }}</a>
+            <a [routerLink]="['/torrent', torrent.torrentId]" [title]="torrent.rdName">{{ torrent.rdName }}</a>
           </td>
-          <td>
+          <td [title]="torrent.category">
             {{ torrent.category }}
           </td>
           <td>
             {{ torrent.priority }}
-          </td>
-          <td>
-            {{ torrent.rdSeeders }}
           </td>
           <td>
             {{ torrent.files.length | number }}
@@ -83,16 +102,26 @@
           <td>
             {{ torrent.rdSize | filesize }}
           </td>
-          <td>
-            {{ torrent.added | date: 'medium' }}
+          <td [title]="torrent.added | date: 'full'">
+            {{ torrent.added | date: 'MMM d, HH:mm' }}
           </td>
-          <td>
-            {{ torrent | status }}
+          <td [title]="status">
+            {{ status }}
           </td>
         </tr>
       } @empty {
         <tr>
-          <td colspan="10">{{ filterText() ? 'No torrents match this filter.' : 'No torrents yet.' }}</td>
+          <td colspan="9">
+            {{
+              loading()
+                ? 'Loading torrents…'
+                : error()
+                  ? 'Torrents could not be loaded.'
+                  : filterText()
+                    ? 'No torrents match this filter.'
+                    : 'No torrents yet.'
+            }}
+          </td>
         </tr>
       }
     </tbody>

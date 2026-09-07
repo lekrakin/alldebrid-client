@@ -14,7 +14,6 @@ function torrent(torrentId, overrides = {}) {
     rdName: torrentId,
     category: '',
     priority: 0,
-    rdSeeders: 0,
     files: [],
     downloads: [],
     rdSize: 0,
@@ -29,7 +28,7 @@ const ids = (rows) => rows.map((row) => row.torrentId);
 test('every displayed sortable column has a selector', () => {
   assert.deepEqual(
     torrentColumns.map(({ key }) => key),
-    ['rdName', 'category', 'priority', 'rdSeeders', 'files.length', 'downloads.length', 'rdSize', 'added', 'rdStatus']
+    ['rdName', 'category', 'priority', 'files.length', 'downloads.length', 'rdSize', 'added', 'rdStatus']
   );
 });
 
@@ -61,7 +60,7 @@ test('file and download columns sort by their counts, not dotted property names'
   assert.deepEqual(ids(visibleTorrents(rows, '', 'downloads.length', 'asc')), ['three', 'two', 'one']);
 });
 
-for (const key of ['priority', 'rdSeeders', 'rdSize', 'rdStatus']) {
+for (const key of ['priority', 'rdSize', 'rdStatus']) {
   test(`${key} sorts numerically in both directions and preserves equal-value order`, () => {
     const rows = [torrent('ten', { [key]: 10 }), torrent('first', { [key]: 2 }), torrent('second', { [key]: 2 })];
     assert.deepEqual(ids(visibleTorrents(rows, '', key, 'asc')), ['first', 'second', 'ten']);
