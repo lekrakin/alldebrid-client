@@ -25,16 +25,10 @@
     @if (activeTab === 0) {
       <div class="flex-container">
         <div style="flex: 1 1 0">
-          <div class="field is-grouped">
-            <div class="control">
-              <button class="button is-danger" (click)="showDeleteModal()">Delete Torrent</button>
-            </div>
-            <div class="control">
-              <button class="button is-primary" (click)="showRetryModal()">Retry Torrent</button>
-            </div>
-            <div class="control">
-              <button class="button is-light" (click)="showUpdateSettingsModal()">Change Settings</button>
-            </div>
+          <div class="buttons">
+            <button class="button is-danger" (click)="showDeleteModal()">Delete Torrent</button>
+            <button class="button" (click)="showRetryModal()">Retry Torrent</button>
+            <button class="button" (click)="showUpdateSettingsModal()">Change Settings</button>
           </div>
           <div class="field">
             <label class="label">Status</label>
@@ -467,7 +461,7 @@
     </section>
     <footer class="modal-card-foot">
       <button
-        class="button is-success"
+        class="button is-danger"
         (click)="deleteOk()"
         [disabled]="deleting() || !hasDeleteAction()"
         [ngClass]="{ 'is-loading': deleting() }"
@@ -500,7 +494,7 @@
     </section>
     <footer class="modal-card-foot">
       <button
-        class="button is-success"
+        class="button is-warning"
         (click)="retryOk()"
         [disabled]="retrying()"
         [ngClass]="{ 'is-loading': retrying() }"
@@ -530,7 +524,7 @@
     </section>
     <footer class="modal-card-foot">
       <button
-        class="button is-success"
+        class="button is-primary"
         (click)="downloadRetryOk()"
         [disabled]="downloadRetrying()"
         [ngClass]="{ 'is-loading': downloadRetrying() }"
@@ -663,7 +657,7 @@
     </section>
     <footer class="modal-card-foot">
       <button
-        class="button is-success"
+        class="button is-primary"
         (click)="updateSettingsOk()"
         [disabled]="updating()"
         [ngClass]="{ 'is-loading': updating() }"
