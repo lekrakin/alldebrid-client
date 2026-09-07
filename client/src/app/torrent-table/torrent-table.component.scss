@@ -1,4 +1,29 @@
 table {
+  th,
+  td:nth-child(8),
+  td:last-child {
+    white-space: nowrap;
+  }
+
+  .sort-button {
+    appearance: none;
+    background: none;
+    border: 0;
+    color: inherit;
+    cursor: pointer;
+    font: inherit;
+    padding: 0;
+
+    &:hover {
+      color: var(--bulma-link-text);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--bulma-link);
+      outline-offset: 4px;
+    }
+  }
+
   thead th i.fas {
     font-size: 0.7em;
     margin-left: 4px;
@@ -11,9 +36,18 @@ table {
   }
 
   tr {
-    cursor: pointer;
-    td.break-all {
-      word-break: break-all;
+    td.torrent-name {
+      min-width: 20rem;
+      overflow-wrap: anywhere;
+
+      a {
+        color: inherit;
+
+        &:hover {
+          color: var(--bulma-link-text);
+          text-decoration: underline;
+        }
+      }
     }
   }
 }

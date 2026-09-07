@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Use a shared orange-accent dark theme and standard buttons while preserving premium status colors.
+- Sort torrent counts correctly without mutating live data, and restrict bulk selection to matching rows.
 - Preserve encoded trackers and literal percent signs when opening magnet links.
 - Explain browser magnet-handler permissions without claiming a request is an active registration.
 - Reuse the source deployment script for UAC elevation, with a read-only dry run and output in the original terminal.

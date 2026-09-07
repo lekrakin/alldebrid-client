@@ -1,33 +1,48 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { Router } from '@angular/router';
+import { RouterLink } from '@angular/router';
 import { Torrent } from '../models/torrent.model';
 import { TorrentService } from '../torrent.service';
 import { forkJoin, Observable } from 'rxjs';
 import { FormsModule } from '@angular/forms';
 import { NgClass, DecimalPipe, DatePipe } from '@angular/common';
 import { TorrentStatusPipe } from '../torrent-status.pipe';
-import { SortPipe } from '../sort.pipe';
 import { FileSizePipe } from '../filesize.pipe';
-import { FilterPipe } from '../filter.pipe';
+import {
+  pruneTorrentSelection,
+  selectVisibleTorrents,
+  torrentColumns,
+  visibleSelectionState,
+  visibleTorrents,
+  type SortDirection,
+  type TorrentSortKey,
+} from './torrent-table-state';
 
 @Component({
   selector: 'app-torrent-table',
   templateUrl: './torrent-table.component.html',
   styleUrls: ['./torrent-table.component.scss'],
-  imports: [FormsModule, NgClass, DecimalPipe, DatePipe, TorrentStatusPipe, SortPipe, FileSizePipe, FilterPipe],
+  imports: [FormsModule, NgClass, DecimalPipe, DatePipe, TorrentStatusPipe, FileSizePipe, RouterLink],
   standalone: true,
 })
 export class TorrentTableComponent implements OnInit {
-  private router = inject(Router);
   private torrentService = inject(TorrentService);
 
   public readonly torrents = signal<Torrent[]>([]);
   public readonly selectedTorrents = signal<string[]>([]);
   public readonly error = signal<string | null>(null);
-  public sortProperty = 'rdName';
-  public sortDirection: 'asc' | 'desc' = 'asc';
-  public filterText = '';
+  public readonly sortColumns = torrentColumns;
+  public readonly sortProperty = signal<TorrentSortKey>('rdName');
+  public readonly sortDirection = signal<SortDirection>('asc');
+  public readonly filterText = signal('');
+  public readonly visibleTorrents = computed(() =>
+    visibleTorrents(this.torrents(), this.filterText(), this.sortProperty(), this.sortDirection())
+  );
+  private readonly visibleSelection = computed(() =>
+    visibleSelectionState(this.selectedTorrents(), this.visibleTorrents())
+  );
+  public readonly allVisibleSelected = computed(() => this.visibleSelection().all);
+  public readonly someVisibleSelected = computed(() => this.visibleSelection().some);
 
   public readonly isDeleteModalActive = signal(false);
   public readonly deleteError = signal<string | null>(null);
@@ -55,17 +70,15 @@ export class TorrentTableComponent implements OnInit {
   public updateSettingsTorrentLifetime: number;
 
   constructor() {
-    const torrentService = this.torrentService;
-
-    torrentService.update$.pipe(takeUntilDestroyed()).subscribe((result) => {
-      this.torrents.set(result);
+    this.torrentService.update$.pipe(takeUntilDestroyed()).subscribe((result) => {
+      this.setTorrents(result);
     });
   }
 
   ngOnInit(): void {
     this.torrentService.getList().subscribe({
       next: (result) => {
-        this.torrents.set(result);
+        this.setTorrents(result);
       },
       error: (err) => {
         this.error.set(err.error);
@@ -73,31 +86,35 @@ export class TorrentTableComponent implements OnInit {
     });
   }
 
-  public sort(property: string): void {
-    this.sortDirection = this.sortProperty === property ? (this.sortDirection === 'asc' ? 'desc' : 'asc') : 'asc';
-    this.sortProperty = property;
+  private setTorrents(torrents: Torrent[]): void {
+    this.torrents.set(torrents);
+    this.selectedTorrents.update((selectedIds) => pruneTorrentSelection(selectedIds, torrents));
   }
 
-  public sortIcon(property: string): Record<string, boolean> {
-    const active = this.sortProperty === property;
+  public sort(property: TorrentSortKey): void {
+    this.sortDirection.update((direction) =>
+      this.sortProperty() === property && direction === 'asc' ? 'desc' : 'asc'
+    );
+    this.sortProperty.set(property);
+  }
+
+  public sortIcon(property: TorrentSortKey): Record<string, boolean> {
+    const active = this.sortProperty() === property;
     return {
       'fa-sort': !active,
-      'fa-sort-up': active && this.sortDirection === 'asc',
-      'fa-sort-down': active && this.sortDirection === 'desc',
+      'fa-sort-up': active && this.sortDirection() === 'asc',
+      'fa-sort-down': active && this.sortDirection() === 'desc',
       'sort-active': active,
     };
   }
 
-  public openTorrent(torrentId: string): void {
-    this.router.navigate([`/torrent/${torrentId}`]);
+  public sortAria(property: TorrentSortKey): 'ascending' | 'descending' | 'none' {
+    return this.sortProperty() === property ? (this.sortDirection() === 'asc' ? 'ascending' : 'descending') : 'none';
   }
 
-  public toggleDeleteSelectAll(event: Event) {
-    const selectedTorrents = (event.target as HTMLInputElement).checked
-      ? this.torrents().map((torrent) => torrent.torrentId)
-      : [];
-
-    this.selectedTorrents.set(selectedTorrents);
+  public toggleSelectVisible(event: Event): void {
+    const selected = (event.target as HTMLInputElement).checked;
+    this.selectedTorrents.update((selectedIds) => selectVisibleTorrents(selectedIds, this.visibleTorrents(), selected));
   }
 
   public toggleSelect(torrentId: string) {
@@ -203,6 +220,9 @@ export class TorrentTableComponent implements OnInit {
   }
 
   private consensus<V>(items: Torrent[], getter: (item: Torrent) => V): V | null {
+    if (items.length === 0) {
+      return null;
+    }
     const first = getter(items[0]);
     return items.every((item) => getter(item) === first) ? first : null;
   }
@@ -219,7 +239,8 @@ export class TorrentTableComponent implements OnInit {
     const selectedTorrentIds = this.selectedTorrents();
     const selectedTorrents = this.torrents().filter((torrent) => selectedTorrentIds.includes(torrent.torrentId));
 
-    selectedTorrents.forEach((torrent) => {
+    selectedTorrents.forEach((currentTorrent) => {
+      const torrent = { ...currentTorrent };
       if (this.updateSettingsDownloadClient != null) {
         torrent.downloadClient = this.updateSettingsDownloadClient;
       }

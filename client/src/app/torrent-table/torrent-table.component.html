@@ -9,57 +9,61 @@
 }
 <div class="field has-addons mb-4">
   <div class="control has-icons-left is-expanded">
-    <input class="input" type="text" placeholder="Filter by name…" [(ngModel)]="filterText" />
+    <input
+      class="input"
+      type="search"
+      aria-label="Filter torrents by name"
+      placeholder="Filter by name…"
+      [ngModel]="filterText()"
+      (ngModelChange)="filterText.set($event)"
+    />
     <span class="icon is-left"><i class="fas fa-search"></i></span>
   </div>
-  @if (filterText) {
+  @if (filterText()) {
     <div class="control">
-      <button class="button" (click)="filterText = ''" title="Clear filter">
-        <i class="fas fa-times"></i>
+      <button class="button" type="button" (click)="filterText.set('')" aria-label="Clear filter">
+        <i class="fas fa-times" aria-hidden="true"></i>
       </button>
     </div>
   }
 </div>
 
 <div class="table-container">
-  <table class="table is-fullwidth is-hoverable">
+  <table class="table is-fullwidth is-hoverable" aria-label="Torrents">
     <thead>
       <tr>
         <th>
           <input
             type="checkbox"
-            (click)="toggleDeleteSelectAll($event)"
-            [checked]="selectedTorrentIds.length > 0 && selectedTorrentIds.length === torrentItems.length"
+            aria-label="Select all matching torrents"
+            (change)="toggleSelectVisible($event)"
+            [checked]="allVisibleSelected()"
+            [indeterminate]="someVisibleSelected()"
+            [disabled]="visibleTorrents().length === 0"
           />
         </th>
-        <th (click)="sort('rdName')">Name <i class="fas" [ngClass]="sortIcon('rdName')"></i></th>
-        <th (click)="sort('category')">Category <i class="fas" [ngClass]="sortIcon('category')"></i></th>
-        <th (click)="sort('priority')">Priority <i class="fas" [ngClass]="sortIcon('priority')"></i></th>
-        <th (click)="sort('rdSeeders')">Seeders <i class="fas" [ngClass]="sortIcon('rdSeeders')"></i></th>
-        <th (click)="sort('files.length')">Files <i class="fas" [ngClass]="sortIcon('files.length')"></i></th>
-        <th (click)="sort('downloads.length')">
-          Downloads <i class="fas" [ngClass]="sortIcon('downloads.length')"></i>
-        </th>
-        <th (click)="sort('rdSize')">Size <i class="fas" [ngClass]="sortIcon('rdSize')"></i></th>
-        <th (click)="sort('added')">Requested <i class="fas" [ngClass]="sortIcon('added')"></i></th>
-        <th (click)="sort('rdStatus')">Status <i class="fas" [ngClass]="sortIcon('rdStatus')"></i></th>
+        @for (column of sortColumns; track column.key) {
+          <th scope="col" [attr.aria-sort]="sortAria(column.key)">
+            <button class="sort-button" type="button" (click)="sort(column.key)">
+              {{ column.label }} <i class="fas" [ngClass]="sortIcon(column.key)" aria-hidden="true"></i>
+            </button>
+          </th>
+        }
       </tr>
     </thead>
     <tbody>
-      @for (
-        torrent of torrentItems | filter: filterText | sort: sortProperty : sortDirection;
-        track torrent.torrentId
-      ) {
+      @for (torrent of visibleTorrents(); track torrent.torrentId) {
         <tr>
           <td>
             <input
               type="checkbox"
-              (click)="toggleSelect(torrent.torrentId)"
+              [attr.aria-label]="'Select ' + torrent.rdName"
+              (change)="toggleSelect(torrent.torrentId)"
               [checked]="selectedTorrentIds.includes(torrent.torrentId)"
             />
           </td>
-          <td (click)="openTorrent(torrent.torrentId)" class="break-all">
-            {{ torrent.rdName }}
+          <td class="torrent-name">
+            <a [routerLink]="['/torrent', torrent.torrentId]">{{ torrent.rdName }}</a>
           </td>
           <td>
             {{ torrent.category }}
@@ -86,24 +90,34 @@
             {{ torrent | status }}
           </td>
         </tr>
+      } @empty {
+        <tr>
+          <td colspan="10">{{ filterText() ? 'No torrents match this filter.' : 'No torrents yet.' }}</td>
+        </tr>
       }
     </tbody>
   </table>
-
-  <div class="flex-container">
-    @if (torrentItems.length > 0) {
-      <button class="button is-danger" (click)="showDeleteModal()" [disabled]="selectedTorrentIds.length === 0">
-        Delete Selected
-      </button>
-      <button class="button is-primary" (click)="showRetryModal()" [disabled]="selectedTorrentIds.length === 0">
-        Retry Selected
-      </button>
-      <button class="button is-primary" (click)="changeSettingsModal()" [disabled]="selectedTorrentIds.length === 0">
-        Change Settings
-      </button>
-    }
-  </div>
 </div>
+
+<div class="buttons" role="group" aria-label="Selected torrent actions">
+  @if (torrentItems.length > 0) {
+    <button class="button is-danger" (click)="showDeleteModal()" [disabled]="selectedTorrentIds.length === 0">
+      Delete Selected
+    </button>
+    <button class="button" (click)="showRetryModal()" [disabled]="selectedTorrentIds.length === 0">
+      Retry Selected
+    </button>
+    <button class="button" (click)="changeSettingsModal()" [disabled]="selectedTorrentIds.length === 0">
+      Change Settings
+    </button>
+    @if (selectedTorrentIds.length > 0) {
+      <button class="button is-ghost" type="button" (click)="selectedTorrents.set([])">Clear selection</button>
+    }
+  }
+</div>
+@if (selectedTorrentIds.length > 0) {
+  <p class="help" role="status">{{ selectedTorrentIds.length }} selected across all filters.</p>
+}
 
 <div class="modal" [class.is-active]="isDeleteModalActive()">
   <div class="modal-background"></div>
@@ -151,7 +165,7 @@
     </section>
     <footer class="modal-card-foot">
       <button
-        class="button is-success"
+        class="button is-danger"
         (click)="deleteOk()"
         [disabled]="deleting() || !hasDeleteAction()"
         [ngClass]="{ 'is-loading': deleting() }"
@@ -184,7 +198,7 @@
     </section>
     <footer class="modal-card-foot">
       <button
-        class="button is-success"
+        class="button is-warning"
         (click)="retryOk()"
         [disabled]="retrying()"
         [ngClass]="{ 'is-loading': retrying() }"
@@ -312,7 +326,7 @@
     </section>
     <footer class="modal-card-foot">
       <button
-        class="button is-success"
+        class="button is-primary"
         (click)="changeSettingsOk()"
         [disabled]="changingSettings()"
         [ngClass]="{ 'is-loading': changingSettings() }"
