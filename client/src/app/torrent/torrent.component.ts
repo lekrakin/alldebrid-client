@@ -15,6 +15,7 @@ import { switchMap } from 'rxjs';
 
 @Component({
   selector: 'app-torrent',
+  host: { class: 'page-layout' },
   templateUrl: './torrent.component.html',
   styleUrls: ['./torrent.component.scss'],
   imports: [

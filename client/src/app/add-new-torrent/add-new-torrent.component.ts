@@ -9,6 +9,7 @@ import { NgClass } from '@angular/common';
 
 @Component({
   selector: 'app-add-new-torrent',
+  host: { class: 'page-layout' },
   templateUrl: './add-new-torrent.component.html',
   styleUrls: ['./add-new-torrent.component.scss'],
   imports: [FormsModule, NgClass],

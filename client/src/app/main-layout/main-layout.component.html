@@ -1,6 +1,6 @@
 <app-navbar></app-navbar>
-<section class="section main-list">
-  <div class="container px-0" [class.is-fluid]="wideContent()">
+<section class="section main-list page-layout">
+  <div class="container px-0 page-layout" [class.is-fluid]="wideContent()">
     <router-outlet
       #content="outlet"
       (activate)="wideContent.set(content.activatedRouteData['wide'] === true)"

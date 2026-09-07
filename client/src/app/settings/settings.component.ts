@@ -12,6 +12,7 @@ import { MagnetHandlerComponent } from './magnet-handler/magnet-handler.componen
 
 @Component({
   selector: 'app-settings',
+  host: { class: 'page-layout' },
   templateUrl: './settings.component.html',
   styleUrls: ['./settings.component.scss'],
   imports: [NgClass, FormsModule, KeyValuePipe, Nl2BrPipe, FileSizePipe, MagnetHandlerComponent],

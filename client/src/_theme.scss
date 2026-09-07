@@ -26,17 +26,25 @@ input[type='radio'] {
   --bulma-table-head-background-color: var(--bulma-scheme-main-ter);
 }
 
+.page-layout {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
 .page-actions {
   position: sticky;
   bottom: 0;
   z-index: 5;
-  padding-block: 1rem;
+  flex-shrink: 0;
+  padding-block: 1rem max(1rem, env(safe-area-inset-bottom));
   background: var(--bulma-scheme-main);
   border-top: 1px solid var(--bulma-border);
 }
 
 .buttons.page-actions {
-  margin-block: 1rem 0;
+  margin-block: auto 0;
 }
 
 .page-actions .help {

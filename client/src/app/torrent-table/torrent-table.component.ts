@@ -34,6 +34,7 @@ import {
 
 @Component({
   selector: 'app-torrent-table',
+  host: { class: 'page-layout' },
   templateUrl: './torrent-table.component.html',
   styleUrls: ['./torrent-table.component.scss'],
   imports: [

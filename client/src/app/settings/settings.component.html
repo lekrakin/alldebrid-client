@@ -59,7 +59,11 @@
 
   @for (tab of tabs(); track tab.key) {
     @if (activeView() === tab.key) {
-      <section [id]="'settings-panel-' + tab.key" [attr.aria-labelledby]="'settings-tab-' + tab.key">
+      <section
+        class="page-layout"
+        [id]="'settings-panel-' + tab.key"
+        [attr.aria-labelledby]="'settings-tab-' + tab.key"
+      >
         @if (tab.description) {
           <p class="has-text-grey mb-5">{{ tab.description }}</p>
         }
@@ -263,8 +267,8 @@
   }
 
   @if (activeView() === accountView) {
-    <section id="settings-panel-account" aria-labelledby="settings-tab-account">
-      <div class="account-panel">
+    <section class="page-layout" id="settings-panel-account" aria-labelledby="settings-tab-account">
+      <div class="account-panel page-layout">
         <h2 class="title is-5 mb-2">Account</h2>
         <p class="has-text-grey mb-5">
           Set the credentials used to access this application. Enter both fields when creating the first account.
