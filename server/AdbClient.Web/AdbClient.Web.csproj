@@ -4,8 +4,8 @@
     <OutputType>Exe</OutputType>
     <UserSecretsId>94c24cba-f03f-4453-a671-3640b517c573</UserSecretsId>
     <!-- x-release-please-start-version -->
-    <Version>1.6.0</Version>
-    <AssemblyVersion>1.6.0</AssemblyVersion>
+    <Version>1.6.1</Version>
+    <AssemblyVersion>1.6.1</AssemblyVersion>
     <!-- x-release-please-end -->
     <AssemblyName>AdbClient.Web</AssemblyName>
     <RootNamespace>AdbClient.Web</RootNamespace>

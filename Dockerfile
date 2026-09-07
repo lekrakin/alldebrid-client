@@ -12,7 +12,7 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0-alpine AS backend-build
 WORKDIR /src
 
 # x-release-please-start-version
-ARG VERSION=1.6.0
+ARG VERSION=1.6.1
 # x-release-please-end
 
 COPY server/AdbClient.sln server/Directory.Build.props ./server/
@@ -39,7 +39,7 @@ FROM ghcr.io/linuxserver/baseimage-alpine:3.22
 
 ARG BUILD_DATE
 # x-release-please-start-version
-ARG VERSION=1.6.0
+ARG VERSION=1.6.1
 # x-release-please-end
 
 LABEL org.opencontainers.image.title="AllDebrid Client" \
