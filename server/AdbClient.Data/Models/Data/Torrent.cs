@@ -25,6 +25,9 @@ public class Torrent
     [JsonIgnore]
     public bool QbittorrentHidden { get; set; }
 
+    [NotMapped]
+    public bool ExternalClientRemoved => QbittorrentHidden;
+
     public TorrentDownloadAction DownloadAction { get; set; }
     public TorrentFinishedAction FinishedAction { get; set; }
     public int FinishedActionDelay { get; set; }
@@ -67,6 +70,9 @@ public class Torrent
     public DateTimeOffset? RdAdded { get; set; }
     public DateTimeOffset? RdEnded { get; set; }
     public long? RdSpeed { get; set; }
+
+    // Retained for database compatibility with earlier versions.
+    [JsonIgnore]
     public long? RdSeeders { get; set; }
     public string? RdFiles { get; set; }
 

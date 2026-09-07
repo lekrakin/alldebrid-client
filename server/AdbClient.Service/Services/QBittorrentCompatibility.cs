@@ -610,7 +610,6 @@ public sealed class QBittorrentCompatibility(
         return torrent.RdStatus switch
         {
             TorrentStatus.Processing or TorrentStatus.WaitingForFileSelection => "metaDL",
-            TorrentStatus.Downloading when torrent.RdSeeders < 1 => "stalledDL",
             TorrentStatus.Downloading => "downloading",
             TorrentStatus.Uploading => "downloading",
             _ => "queuedDL"

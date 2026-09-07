@@ -22,6 +22,32 @@ namespace AdbClient.Service.Test.Services;
 [Collection(SettingsIsolationCollection.Name)]
 public class QBittorrentCompatibilityTest
 {
+    [Theory]
+    [InlineData(null)]
+    [InlineData(0L)]
+    [InlineData(10L)]
+    public async Task GetTorrents_ProviderDownloadingDoesNotDependOnLegacySeederCount(long? legacySeeders)
+    {
+        var torrent = new Torrent
+        {
+            TorrentId = Guid.NewGuid(),
+            Hash = "0123456789abcdef0123456789abcdef01234567",
+            RdName = "Provider download",
+            RdSize = 400,
+            RdProgress = 25,
+            RdStatus = TorrentStatus.Downloading,
+            RdSeeders = legacySeeders
+        };
+        var torrentData = new Mock<ITorrentData>();
+        torrentData.Setup(data => data.Get()).ReturnsAsync([torrent]);
+        var compatibility = CreateCompatibility(torrentData: torrentData);
+
+        var info = Assert.Single(await compatibility.GetTorrents(null));
+
+        Assert.Equal("downloading", info.State);
+        Assert.Equal(0, info.DownloadSpeed);
+    }
+
     [Fact]
     public async Task GetTorrents_MapsLogposeFieldsAndFiltersCategory()
     {

@@ -134,7 +134,6 @@ public class TorrentData(DataContext dataContext) : ITorrentData
             db.RdAdded = torrent.RdAdded;
             db.RdEnded = torrent.RdEnded;
             db.RdSpeed = torrent.RdSpeed;
-            db.RdSeeders = torrent.RdSeeders;
             db.RdFiles = torrent.RdFiles;
         });
 
@@ -310,7 +309,6 @@ public class TorrentData(DataContext dataContext) : ITorrentData
                 dbTorrent.RdEnded = null;
                 dbTorrent.RdProgress = null;
                 dbTorrent.RdSpeed = null;
-                dbTorrent.RdSeeders = null;
                 dbTorrent.RdFiles = null;
                 dbTorrent.RdStatus = TorrentStatus.Queued;
                 dbTorrent.RdStatusRaw = null;

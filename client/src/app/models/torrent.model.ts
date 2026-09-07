@@ -4,6 +4,7 @@ export class Torrent {
   public torrentId: string;
   public hash: string;
   public category: string;
+  public readonly externalClientRemoved?: boolean;
   public downloadClient: number;
   public hostDownloadAction: number;
   public finishedAction: number;
@@ -39,7 +40,6 @@ export class Torrent {
   public rdAdded: Date;
   public rdEnded: Date;
   public rdSpeed: number;
-  public rdSeeders: number;
   public rdFiles: string;
 
   public files: TorrentFile[];

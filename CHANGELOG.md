@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Use a shared orange-accent dark theme and standard buttons while preserving premium status colors.
 - Sort torrent counts correctly without mutating live data, and restrict bulk selection to matching rows.
+- Add resizable, single-line torrent columns, a wider list layout, and compact dates with full timestamp tooltips.
+- Show external-client removal separately from download status without changing categories or assuming an import succeeded.
+- Remove seeder tracking and seeder-based stalled states; use AllDebrid's reported download state instead.
 - Preserve encoded trackers and literal percent signs when opening magnet links.
 - Explain browser magnet-handler permissions without claiming a request is an active registration.
 - Reuse the source deployment script for UAC elevation, with a read-only dry run and output in the original terminal.

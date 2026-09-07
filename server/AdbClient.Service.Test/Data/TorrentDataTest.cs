@@ -10,6 +10,38 @@ namespace AdbClient.Service.Test.Data;
 public class TorrentDataTest
 {
     [Fact]
+    public async Task UpdateRdData_PreservesUnusedLegacySeederColumn()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<DataContext>().UseSqlite(connection).Options;
+        await using var dataContext = new DataContext(options);
+        await dataContext.Database.EnsureCreatedAsync();
+        var torrent = new Torrent
+        {
+            TorrentId = Guid.NewGuid(),
+            Hash = "0123456789abcdef0123456789abcdef01234567",
+            RdSeeders = 10
+        };
+        dataContext.Torrents.Add(torrent);
+        await dataContext.SaveChangesAsync();
+        var torrentData = new TorrentData(dataContext);
+
+        await torrentData.UpdateRdData(new Torrent
+        {
+            TorrentId = torrent.TorrentId,
+            RdProgress = 25,
+            RdStatus = TorrentStatus.Downloading
+        });
+
+        dataContext.ChangeTracker.Clear();
+        var stored = await dataContext.Torrents.AsNoTracking().SingleAsync();
+        Assert.Equal(10, stored.RdSeeders);
+        Assert.Equal(25, stored.RdProgress);
+        Assert.Equal(TorrentStatus.Downloading, stored.RdStatus);
+    }
+
+    [Fact]
     public async Task Add_CapturesCurrentDownloadPathsForNewTorrent()
     {
         const string localPath = "/storage/current";

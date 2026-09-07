@@ -1,6 +1,7 @@
 using System.IO.Abstractions.TestingHelpers;
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using AdbClient.Data.Data;
 using AdbClient.Data.Enums;
 using AdbClient.Data.Models.Data;
@@ -108,6 +109,7 @@ public class QBittorrentLifecycleTest
             Assert.Equal("/media/downloads", queued.ClientReportedDownloadPath);
             Assert.Equal("radarr", queued.Category);
             Assert.Null(queued.Completed);
+            await AssertHistoryState(client, torrentId, false);
 
             // Stand in for provider/download completion; no worker or external network is started.
             var completed = DateTimeOffset.UtcNow;
@@ -160,6 +162,7 @@ public class QBittorrentLifecycleTest
                 Assert.Equal("123", retained.RdId);
                 Assert.Equal(completed, retained.Completed);
                 Assert.True((await context.Torrents.AsNoTracking().SingleAsync()).QbittorrentHidden);
+                await AssertHistoryState(client, torrentId, true);
             }
 
             for (var attempt = 0; attempt < 2; attempt++)
@@ -179,6 +182,7 @@ public class QBittorrentLifecycleTest
                 var readdedInfo = Assert.Single((await client.GetFromJsonAsync<QBittorrentTorrentInfo[]>("api/v2/torrents/info?category=radarr"))!);
                 Assert.Equal(payloadMoved ? "queuedDL" : "pausedUP", readdedInfo.State);
                 Assert.Equal(payloadMoved ? 0.5d : 1d, readdedInfo.Progress);
+                await AssertHistoryState(client, torrentId, false);
             }
 
             Assert.Equal("media payload", fileSystem.File.ReadAllText(retainedPayloadPath));
@@ -202,6 +206,21 @@ public class QBittorrentLifecycleTest
 
     private static FormUrlEncodedContent Form(params (string Key, string Value)[] values) =>
         new(values.Select(value => new KeyValuePair<string, string>(value.Key, value.Value)));
+
+    private static async Task AssertHistoryState(HttpClient client, Guid torrentId, bool externalClientRemoved)
+    {
+        using var response = await client.GetAsync("api/torrents");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var row = Assert.Single(json.RootElement.EnumerateArray());
+        Assert.Equal(torrentId, row.GetProperty("torrentId").GetGuid());
+        Assert.Equal("radarr", row.GetProperty("category").GetString());
+        Assert.Equal(externalClientRemoved, row.GetProperty("externalClientRemoved").GetBoolean());
+        Assert.False(row.TryGetProperty("qbittorrentHidden", out _));
+        Assert.False(row.TryGetProperty("localDownloadPath", out _));
+        Assert.False(row.TryGetProperty("clientReportedDownloadPath", out _));
+        Assert.False(row.TryGetProperty("rdSeeders", out _));
+    }
 
     private static async Task Add(HttpClient client)
     {

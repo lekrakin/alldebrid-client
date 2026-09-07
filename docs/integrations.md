@@ -79,4 +79,6 @@ External applications complete their workflows by calling the qBittorrent delete
 
 This separation lets an external application clean its imported source without silently overriding the configured provider and history retention policy.
 
+Retained jobs show **client cleared** alongside their download status after an external client removes them. This is not an import confirmation: the qBittorrent removal request does not identify why the job was removed. Categories stay unchanged.
+
 Earlier builds represented a retained external deletion by appending `-retained` to the job category. Existing rows already changed that way are not guessed or rewritten during upgrade; review or rename those historical records manually if needed.
