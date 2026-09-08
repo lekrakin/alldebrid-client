@@ -61,6 +61,7 @@ export class TorrentComponent implements OnInit {
   public downloadRetryId: string;
 
   public readonly isUpdateSettingsModalActive = signal(false);
+  public readonly updateSettingsError = signal<string | null>(null);
 
   public updateSettingsDownloadClient: number;
   public updateSettingsHostDownloadAction: number;
@@ -242,24 +243,27 @@ export class TorrentComponent implements OnInit {
     this.updateSettingsDeleteOnError = torrent.deleteOnError;
     this.updateSettingsTorrentLifetime = torrent.lifetime;
 
+    this.updateSettingsError.set(null);
     this.isUpdateSettingsModalActive.set(true);
   }
 
   public updateSettingsCancel(): void {
-    this.isUpdateSettingsModalActive.set(false);
+    if (!this.updating()) {
+      this.isUpdateSettingsModalActive.set(false);
+    }
   }
 
   public updateSettingsOk(): void {
     const torrent = this.torrentState();
 
-    if (torrent === null) {
+    if (torrent === null || this.updating()) {
       return;
     }
 
+    this.updateSettingsError.set(null);
     this.updating.set(true);
 
-    const updatedTorrent = {
-      ...torrent,
+    const settings = {
       downloadClient: this.updateSettingsDownloadClient,
       hostDownloadAction: this.updateSettingsHostDownloadAction,
       category: this.updateSettingsCategory,
@@ -270,15 +274,20 @@ export class TorrentComponent implements OnInit {
       lifetime: this.updateSettingsTorrentLifetime,
     };
 
-    this.torrentState.set(updatedTorrent);
-
-    this.torrentService.update(updatedTorrent).subscribe({
+    this.torrentService.update({ ...torrent, ...settings }).subscribe({
       next: () => {
+        this.torrentState.update((current) =>
+          current?.torrentId === torrent.torrentId ? { ...current, ...settings } : current
+        );
         this.isUpdateSettingsModalActive.set(false);
         this.updating.set(false);
       },
-      error: () => {
-        this.isUpdateSettingsModalActive.set(false);
+      error: (err) => {
+        this.updateSettingsError.set(
+          typeof err.error === 'string' && err.error.trim()
+            ? err.error.trim()
+            : 'Torrent settings could not be saved. Please try again.'
+        );
         this.updating.set(false);
       },
     });

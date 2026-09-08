@@ -544,7 +544,7 @@
   <div class="modal-card">
     <header class="modal-card-head">
       <p class="modal-card-title">Update torrent settings</p>
-      <button class="delete" aria-label="close" (click)="updateSettingsCancel()"></button>
+      <button class="delete" aria-label="close" (click)="updateSettingsCancel()" [disabled]="updating()"></button>
     </header>
     <section class="modal-card-body">
       <p>
@@ -554,7 +554,7 @@
       <div class="field">
         <label class="label">Downloader</label>
         <div class="control select is-fullwidth">
-          <select [(ngModel)]="updateSettingsDownloadClient">
+          <select [(ngModel)]="updateSettingsDownloadClient" [disabled]="updating()">
             <option [ngValue]="0">Internal Downloader</option>
           </select>
         </div>
@@ -565,7 +565,7 @@
       <div class="field">
         <label class="label">Post Download Action</label>
         <div class="control select is-fullwidth">
-          <select [(ngModel)]="updateSettingsHostDownloadAction">
+          <select [(ngModel)]="updateSettingsHostDownloadAction" [disabled]="updating()">
             <option [ngValue]="null"></option>
             <option [ngValue]="0">Download all files to host</option>
             <option [ngValue]="1">Don't download any files to host</option>
@@ -579,14 +579,14 @@
       <div class="field">
         <label class="label">Category</label>
         <div class="control">
-          <input class="input" type="text" [(ngModel)]="updateSettingsCategory" />
+          <input class="input" type="text" [(ngModel)]="updateSettingsCategory" [disabled]="updating()" />
         </div>
         <p class="help">The category becomes a sub-folder in your main download path.</p>
       </div>
       <div class="field">
         <label class="label">Priority</label>
         <div class="control">
-          <input class="input" type="number" step="1" [(ngModel)]="updateSettingsPriority" />
+          <input class="input" type="number" step="1" [(ngModel)]="updateSettingsPriority" [disabled]="updating()" />
         </div>
         <p class="help">
           Set the priority for this torrent where 1 is the highest. When empty it will be assigned the lowest priority.
@@ -602,6 +602,7 @@
             min="0"
             step="1"
             [(ngModel)]="updateSettingsDownloadRetryAttempts"
+            [disabled]="updating()"
           />
         </div>
         <p class="help">When a single download fails it will retry it this many times before marking it as failed.</p>
@@ -616,6 +617,7 @@
             min="0"
             step="1"
             [(ngModel)]="updateSettingsTorrentRetryAttempts"
+            [disabled]="updating()"
           />
         </div>
         <p class="help">
@@ -626,7 +628,15 @@
       <div class="field">
         <label class="label">Delete download when in error</label>
         <div class="control">
-          <input class="input" type="number" max="1000" min="0" step="1" [(ngModel)]="updateSettingsDeleteOnError" />
+          <input
+            class="input"
+            type="number"
+            max="1000"
+            min="0"
+            step="1"
+            [(ngModel)]="updateSettingsDeleteOnError"
+            [disabled]="updating()"
+          />
         </div>
         <p class="help">
           When a download has been in error for this many minutes, delete it from the provider and the client. 0 to
@@ -643,6 +653,7 @@
             min="0"
             step="1"
             [(ngModel)]="updateSettingsTorrentLifetime"
+            [disabled]="updating()"
           />
         </div>
         <p class="help">
@@ -651,7 +662,7 @@
         </p>
       </div>
     </section>
-    <footer class="modal-card-foot">
+    <footer class="modal-card-foot is-flex-wrap-wrap">
       <button
         class="button is-primary"
         (click)="updateSettingsOk()"
@@ -668,6 +679,9 @@
       >
         Cancel
       </button>
+      @if (updateSettingsError(); as updateSettingsError) {
+        <p class="help is-danger" role="alert">{{ updateSettingsError }}</p>
+      }
     </footer>
   </div>
 </div>
