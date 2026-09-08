@@ -27,7 +27,6 @@
           [ngModel]="magnetLink()"
           (ngModelChange)="magnetLink.set($event)"
           [disabled]="saving()"
-          (paste)="onPaste($event)"
         ></textarea>
       </div>
     </div>

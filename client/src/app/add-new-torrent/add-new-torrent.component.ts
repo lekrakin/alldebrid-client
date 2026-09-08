@@ -140,15 +140,4 @@ export class AddNewTorrentComponent implements OnInit {
       this.saving.set(false);
     }
   }
-
-  public onPaste(event: ClipboardEvent): void {
-    const magnetLink = event.clipboardData?.getData('text');
-
-    if (!magnetLink) {
-      return;
-    }
-
-    event.preventDefault();
-    this.magnetLink.set(magnetLink);
-  }
 }
