@@ -1,13 +1,12 @@
-﻿using System.Diagnostics;
-using Microsoft.AspNetCore.Authentication.Cookies;
-using Microsoft.AspNetCore.Identity;
-using Microsoft.Extensions.Hosting.WindowsServices;
 using AdbClient.Data.Data;
 using AdbClient.Data.Models.Internal;
 using AdbClient.Service;
 using AdbClient.Service.Middleware;
 using AdbClient.Service.Services;
 using AdbClient.Web;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Hosting.WindowsServices;
 using Serilog;
 using Serilog.Events;
 
@@ -20,28 +19,26 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 // Bind AppSettings
 var appSettings = new AppSettings();
 builder.Configuration.Bind(appSettings);
+appSettings.NormalizeAndValidate(Environment.CurrentDirectory,
+                                 Environment.GetEnvironmentVariable("BASE_PATH"));
 builder.Services.AddSingleton(appSettings);
 
 // Configure URLs
-if (appSettings.Port <= 0)
-{
-    appSettings.Port = 6500;
-}
-
 builder.WebHost.ConfigureKestrel(options =>
 {
     options.ListenAnyIP(appSettings.Port);
 });
 
-var logPath = appSettings.Logging?.File?.Path ?? Path.Combine(appSettings.DataPath, "adbclient.log");
+var fileLogging = appSettings.Logging!.File!;
+var logPath = fileLogging.Path!;
 
 Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
 
 builder.Host.UseSerilog((_, lc) => lc.Enrich.FromLogContext()
                                      .WriteTo.File(logPath,
                                                    rollOnFileSizeLimit: true,
-                                                   fileSizeLimitBytes: appSettings.Logging?.File?.FileSizeLimitBytes ?? 5_242_880,
-                                                   retainedFileCountLimit: appSettings.Logging?.File?.MaxRollingFiles ?? 5,
+                                                   fileSizeLimitBytes: fileLogging.FileSizeLimitBytes,
+                                                   retainedFileCountLimit: fileLogging.MaxRollingFiles,
                                                    outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}",
                                                    restrictedToMinimumLevel: LogEventLevel.Verbose)
                                      .WriteTo.Console()
@@ -49,13 +46,7 @@ builder.Host.UseSerilog((_, lc) => lc.Enrich.FromLogContext()
                                      .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
                                      .MinimumLevel.Override("System.Net.Http", LogEventLevel.Warning));
 
-Serilog.Debugging.SelfLog.Enable(msg =>
-{
-    Debug.Print(msg);
-    Debugger.Break();
-    Console.WriteLine(msg);
-    Debug.WriteLine(msg);
-});
+Serilog.Debugging.SelfLog.Enable(TextWriter.Synchronized(Console.Error));
 
 Log.Information("Starting AllDebrid Client host");
 
@@ -116,7 +107,7 @@ builder.Services.AddSession();
 
 builder.Services.AddSignalR(hubOptions =>
 {
-    hubOptions.EnableDetailedErrors = true;
+    hubOptions.EnableDetailedErrors = builder.Environment.IsDevelopment();
 });
 
 builder.Services.AddHealthChecks();
@@ -149,12 +140,10 @@ try
         }
     });
 
-    var basePath = !string.IsNullOrWhiteSpace(appSettings.BasePath) ? appSettings.BasePath : !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("BASE_PATH")) ? Environment.GetEnvironmentVariable("BASE_PATH") : null;
-
-    if (basePath != null)
+    if (appSettings.BasePath is { } basePath)
     {
         app.UseMiddleware<BaseHrefMiddleware>(basePath);
-        app.UsePathBase($"/{basePath.TrimStart('/').TrimEnd('/')}/");
+        app.UsePathBase($"/{basePath}");
     }
 
     app.UseMiddleware<RequestLoggingMiddleware>();
@@ -174,7 +163,7 @@ try
     app.MapHealthChecks("/health");
 
     app.MapFallbackToFile("index.html");
-    
+
     // Run the app
     app.Run();
 }

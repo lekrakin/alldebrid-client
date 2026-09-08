@@ -1,6 +1,5 @@
 #!/usr/bin/with-contenv bash
 
-rm -f /config/adbclient.pid /data/adbclient.pid
-
-echo "Setting permissions"
-chown -R abc:abc /app /data
+echo "Setting data permissions"
+chown abc:abc /data /data/downloads
+chown -R abc:abc /data/db

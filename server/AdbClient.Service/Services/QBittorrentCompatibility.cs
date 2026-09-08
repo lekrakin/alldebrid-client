@@ -1,5 +1,6 @@
 using System.IO.Abstractions;
 using AdbClient.Data.Enums;
+using AdbClient.Data.Helpers;
 using AdbClient.Data.Models.Data;
 using AdbClient.Service.Helpers;
 using AdbClient.Service.Models.QBittorrent;
@@ -18,10 +19,6 @@ public sealed class QBittorrentCompatibility(
     public const int MaxTorrentFileSizeBytes = 32 * 1024 * 1024;
 
     private const long UnknownEta = 8_640_000;
-    private const string LogposeCategory = "logpose";
-    private const string RetainedCategorySuffix = "-retained";
-    private const string LogposeRetainedCategory = LogposeCategory + RetainedCategorySuffix;
-
     public async Task<bool> Login(string userName, string password)
     {
         var result = await authentication.Login(userName, password);
@@ -38,9 +35,10 @@ public sealed class QBittorrentCompatibility(
 
     public async Task<IReadOnlyDictionary<string, QBittorrentCategory>> GetCategories()
     {
-        var configuredCategories = (Settings.Get.General.Categories ?? string.Empty)
+        var configuredCategories = (Settings.Get.Integrations.Categories ?? string.Empty)
                                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         var assignedCategories = (await torrents.Get())
+                                .Where(torrent => !torrent.QbittorrentHidden)
                                 .Select(torrent => torrent.Category)
                                 .Where(category => !string.IsNullOrWhiteSpace(category))
                                 .Select(category => category!);
@@ -62,7 +60,7 @@ public sealed class QBittorrentCompatibility(
         category = NormalizeCategory(category)
                    ?? throw new ArgumentException("Category cannot be empty.", nameof(category));
 
-        var categories = (Settings.Get.General.Categories ?? string.Empty)
+        var categories = (Settings.Get.Integrations.Categories ?? string.Empty)
                          .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                          .Distinct(StringComparer.OrdinalIgnoreCase)
                          .ToList();
@@ -105,22 +103,42 @@ public sealed class QBittorrentCompatibility(
             if (!Uri.TryCreate(normalizedTorrentUrl, UriKind.Absolute, out var uri) ||
                 (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
             {
-                throw new ArgumentException($"Unsupported torrent URL: {normalizedTorrentUrl}", nameof(urls));
+                throw new ArgumentException("Unsupported torrent URL.", nameof(urls));
             }
 
-            logger.LogDebug("Downloading torrent metadata from {TorrentUrl}", uri);
+            logger.LogDebug(
+                "Downloading torrent metadata from {TorrentScheme} origin {TorrentHost} on port {TorrentPort}",
+                uri.Scheme,
+                uri.IdnHost,
+                uri.Port);
 
             var client = httpClientFactory.CreateClient();
-            using var response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-            response.EnsureSuccessStatusCode();
+            byte[] fileBytes;
 
-            if (response.Content.Headers.ContentLength > MaxTorrentFileSizeBytes)
+            try
             {
-                throw new ArgumentException("Torrent file exceeds the 32 MB limit.", nameof(urls));
+                using var response = await client.GetAsync(uri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                response.EnsureSuccessStatusCode();
+
+                if (response.Content.Headers.ContentLength > MaxTorrentFileSizeBytes)
+                {
+                    throw new ArgumentException("Torrent file exceeds the 32 MB limit.", nameof(urls));
+                }
+
+                await response.Content.LoadIntoBufferAsync(MaxTorrentFileSizeBytes, cancellationToken);
+                fileBytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+            }
+            catch (HttpRequestException ex)
+            {
+                logger.LogDebug(
+                    "Torrent metadata request failed with {ExceptionType}",
+                    ex.GetType().Name);
+
+                // Do not retain the original exception: HTTP exception messages can contain
+                // the complete request URI, which may include credentials or passkeys.
+                throw new HttpRequestException("Unable to download torrent metadata.", null, ex.StatusCode);
             }
 
-            await response.Content.LoadIntoBufferAsync(MaxTorrentFileSizeBytes, cancellationToken);
-            var fileBytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
             await torrents.AddFileToDebridQueue(fileBytes, torrent);
         }
     }
@@ -161,14 +179,14 @@ public sealed class QBittorrentCompatibility(
 
         if (!isValidInfoHashSearch)
         {
-            throw new ArgumentException($"Unsupported Nyaa search URL: {torrentUrl}", nameof(torrentUrl));
+            throw new ArgumentException("Unsupported Nyaa search URL.", nameof(torrentUrl));
         }
 
         var infoHash = uri.Query[queryPrefix.Length..];
 
         if (infoHash.Any(character => !Uri.IsHexDigit(character)))
         {
-            throw new ArgumentException($"Unsupported Nyaa search URL: {torrentUrl}", nameof(torrentUrl));
+            throw new ArgumentException("Unsupported Nyaa search URL.", nameof(torrentUrl));
         }
 
         return $"magnet:?xt=urn:btih:{infoHash.ToLowerInvariant()}";
@@ -177,7 +195,7 @@ public sealed class QBittorrentCompatibility(
     public async Task<IReadOnlyList<QBittorrentTorrentInfo>> GetTorrents(string? category)
     {
         var allTorrents = await torrents.Get();
-        var filteredTorrents = allTorrents.AsEnumerable();
+        var filteredTorrents = allTorrents.Where(torrent => !torrent.QbittorrentHidden);
 
         if (!string.IsNullOrWhiteSpace(category) && !category.Equals("all", StringComparison.OrdinalIgnoreCase))
         {
@@ -192,7 +210,7 @@ public sealed class QBittorrentCompatibility(
     {
         var torrent = await torrents.GetByHash(hash);
 
-        if (torrent == null)
+        if (torrent == null || torrent.QbittorrentHidden)
         {
             return null;
         }
@@ -200,7 +218,7 @@ public sealed class QBittorrentCompatibility(
         return new()
         {
             Hash = torrent.Hash,
-            SavePath = GetSavePath(torrent.Category),
+            SavePath = GetTorrentSavePath(torrent),
             SeedingTime = 0
         };
     }
@@ -209,7 +227,7 @@ public sealed class QBittorrentCompatibility(
     {
         var torrent = await torrents.GetByHash(hash);
 
-        if (torrent == null)
+        if (torrent == null || torrent.QbittorrentHidden)
         {
             return null;
         }
@@ -241,7 +259,7 @@ public sealed class QBittorrentCompatibility(
         {
             var torrent = await torrents.GetByHash(hash);
 
-            if (torrent == null)
+            if (torrent == null || torrent.QbittorrentHidden)
             {
                 continue;
             }
@@ -259,6 +277,13 @@ public sealed class QBittorrentCompatibility(
     {
         foreach (var hash in SplitHashes(hashes))
         {
+            var torrent = await torrents.GetByHash(hash);
+
+            if (torrent == null || torrent.QbittorrentHidden)
+            {
+                continue;
+            }
+
             await torrents.UpdatePriority(hash, 1);
         }
     }
@@ -269,34 +294,14 @@ public sealed class QBittorrentCompatibility(
         {
             var torrent = await torrents.GetByHash(hash);
 
-            if (torrent == null)
+            if (torrent == null || torrent.QbittorrentHidden)
             {
                 continue;
             }
 
-            var retainLogposeJob = !deleteFiles && IsLogposeManagedCategory(torrent.Category);
             var cleanupPlan = deleteFiles
                 ? null
-                : CreateEmptyDirectoryCleanupPlan(
-                    torrent,
-                    string.Equals(torrent.Category, LogposeRetainedCategory, StringComparison.OrdinalIgnoreCase)
-                        ? LogposeCategory
-                        : null);
-
-            if (retainLogposeJob)
-            {
-                // Logpose uses deleteFiles=false after a successful import. Move the job out
-                // of its active category so Logpose can finish, while leaving ADC and the
-                // provider record under the user's configured retention policy.
-                await MoveToRetainedCategory(torrent, hash);
-
-                if (cleanupPlan != null)
-                {
-                    CleanupEmptyJobDirectories(cleanupPlan);
-                }
-
-                continue;
-            }
+                : CreateEmptyDirectoryCleanupPlan(torrent);
 
             switch (torrent.FinishedAction)
             {
@@ -304,23 +309,18 @@ public sealed class QBittorrentCompatibility(
                     await torrents.Delete(torrent.TorrentId, true, true, deleteFiles);
                     break;
                 case TorrentFinishedAction.RemoveProvider:
-                    await torrents.Delete(torrent.TorrentId, false, true, deleteFiles);
+                    await torrents.Delete(torrent.TorrentId, false, true, deleteFiles, true);
                     break;
                 case TorrentFinishedAction.RemoveClient:
                     await torrents.Delete(torrent.TorrentId, true, false, deleteFiles);
                     break;
                 case TorrentFinishedAction.None:
-                    if (deleteFiles)
-                    {
-                        await torrents.DeleteLocalFiles(torrent);
-                    }
-
-                    await MoveToRetainedCategory(torrent, hash);
+                    await torrents.Delete(torrent.TorrentId, false, false, deleteFiles, true);
 
                     logger.LogDebug(
                         "Retaining qBittorrent record {TorrentHash} under its configured finished action",
                         torrent.Hash);
-                    continue;
+                    break;
                 default:
                     throw new ArgumentOutOfRangeException(
                         nameof(torrent.FinishedAction),
@@ -354,22 +354,14 @@ public sealed class QBittorrentCompatibility(
 
     private static string? NormalizeCategory(string? category)
     {
-        if (string.IsNullOrWhiteSpace(category))
+        var normalized = TorrentCategory.Normalize(category);
+
+        if (normalized == null)
         {
             return null;
         }
 
-        var normalized = category.Trim();
-        var segments = normalized.Split('/');
-
-        if (normalized.Contains('\\') ||
-            segments.Any(segment => string.IsNullOrWhiteSpace(segment) || segment is "." or "..") ||
-            normalized.Any(character => character < ' ' || "<>,:\"|?*".Contains(character)))
-        {
-            throw new ArgumentException($"Invalid torrent category: {category}", nameof(category));
-        }
-
-        var downloadRoot = FileSystemPath.Normalize(Settings.Get.Paths.DownloadPath);
+        var downloadRoot = FileSystemPath.Normalize(Settings.Get.Storage.DownloadPath);
         var categoryPath = FileSystemPath.Normalize(Path.Combine(
             downloadRoot,
             normalized.Replace('/', Path.DirectorySeparatorChar)));
@@ -382,30 +374,10 @@ public sealed class QBittorrentCompatibility(
         return normalized;
     }
 
-    private static bool IsLogposeManagedCategory(string? category)
+    private EmptyDirectoryCleanupPlan? CreateEmptyDirectoryCleanupPlan(Torrent torrent)
     {
-        return string.Equals(category, LogposeCategory, StringComparison.OrdinalIgnoreCase) ||
-               string.Equals(category, LogposeRetainedCategory, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private async Task MoveToRetainedCategory(Torrent torrent, string hash)
-    {
-        if (string.IsNullOrWhiteSpace(torrent.Category) ||
-            torrent.Category.EndsWith(RetainedCategorySuffix, StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        var retainedCategory = torrent.Category + RetainedCategorySuffix;
-        await torrents.UpdateCategory(hash, retainedCategory);
-        torrent.Category = retainedCategory;
-    }
-
-    private EmptyDirectoryCleanupPlan? CreateEmptyDirectoryCleanupPlan(
-        Torrent torrent,
-        string? categoryOverride = null)
-    {
-        if (string.IsNullOrWhiteSpace(Settings.Get.Paths.DownloadPath) ||
+        if ((string.IsNullOrWhiteSpace(torrent.LocalDownloadPath) &&
+             string.IsNullOrWhiteSpace(Settings.Get.Storage.DownloadPath)) ||
             string.IsNullOrWhiteSpace(torrent.RdName))
         {
             return null;
@@ -413,11 +385,13 @@ public sealed class QBittorrentCompatibility(
 
         try
         {
-            var downloadRoot = FileSystemPath.Normalize(Settings.Get.Paths.DownloadPath);
-            var cleanupCategory = categoryOverride ?? torrent.Category;
-            var categoryRoot = string.IsNullOrWhiteSpace(cleanupCategory)
+            var downloadRoot = FileSystemPath.Normalize(
+                string.IsNullOrWhiteSpace(torrent.LocalDownloadPath)
+                    ? Settings.Get.Storage.DownloadPath
+                    : torrent.LocalDownloadPath);
+            var categoryRoot = string.IsNullOrWhiteSpace(torrent.Category)
                 ? downloadRoot
-                : FileSystemPath.Normalize(fileSystem.Path.Combine(downloadRoot, cleanupCategory));
+                : FileSystemPath.Normalize(fileSystem.Path.Combine(downloadRoot, torrent.Category));
 
             if (!FileSystemPath.IsSameOrDescendant(categoryRoot, downloadRoot))
             {
@@ -555,7 +529,7 @@ public sealed class QBittorrentCompatibility(
 
     private static Torrent CreateTorrent(string? category)
     {
-        var defaults = Settings.Get.DownloadClient.Default;
+        var defaults = Settings.Get.Downloads.Defaults;
         var normalizedCategory = NormalizeCategory(
             string.IsNullOrWhiteSpace(category) ? defaults.Category : category);
 
@@ -563,9 +537,6 @@ public sealed class QBittorrentCompatibility(
         {
             Category = normalizedCategory,
             DownloadClient = Data.Enums.DownloadClient.Internal,
-            DownloadAction = defaults.OnlyDownloadAvailableFiles
-                ? TorrentDownloadAction.DownloadAvailableFiles
-                : TorrentDownloadAction.DownloadAll,
             HostDownloadAction = defaults.HostDownloadAction,
             FinishedAction = defaults.FinishedAction,
             FinishedActionDelay = defaults.FinishedActionDelay,
@@ -598,7 +569,7 @@ public sealed class QBittorrentCompatibility(
         var downloadSpeed = torrent.Downloads.Count > 0 ? localSpeed : Math.Max(0, torrent.RdSpeed ?? 0);
         var activeDownloadSize = torrent.Downloads.Sum(download => Math.Max(0, download.BytesTotal));
         var size = Math.Max(0, torrent.RdSize ?? activeDownloadSize);
-        var savePath = GetSavePath(torrent.Category);
+        var savePath = GetTorrentSavePath(torrent);
 
         return new()
         {
@@ -639,7 +610,6 @@ public sealed class QBittorrentCompatibility(
         return torrent.RdStatus switch
         {
             TorrentStatus.Processing or TorrentStatus.WaitingForFileSelection => "metaDL",
-            TorrentStatus.Downloading when torrent.RdSeeders < 1 => "stalledDL",
             TorrentStatus.Downloading => "downloading",
             TorrentStatus.Uploading => "downloading",
             _ => "queuedDL"
@@ -664,11 +634,29 @@ public sealed class QBittorrentCompatibility(
 
     private static string GetSavePath(string? category)
     {
-        var mappedPath = string.IsNullOrWhiteSpace(Settings.Get.Paths.MappedPath)
-            ? Settings.Get.Paths.DownloadPath
-            : Settings.Get.Paths.MappedPath;
+        var mappedPath = string.IsNullOrWhiteSpace(Settings.Get.Integrations.ReportedDownloadPath)
+            ? Settings.Get.Storage.DownloadPath
+            : Settings.Get.Integrations.ReportedDownloadPath;
 
         return CombineMappedPath(mappedPath, category);
+    }
+
+    private static string GetTorrentSavePath(Torrent torrent)
+    {
+        var settings = Settings.Get;
+        var usesCurrentLocalPath = string.IsNullOrWhiteSpace(torrent.LocalDownloadPath) ||
+                                   FileSystemPath.PathsEqual(
+                                       torrent.LocalDownloadPath,
+                                       settings.Storage.DownloadPath);
+        var mappedPath = usesCurrentLocalPath
+            ? string.IsNullOrWhiteSpace(settings.Integrations.ReportedDownloadPath)
+                ? settings.Storage.DownloadPath
+                : settings.Integrations.ReportedDownloadPath
+            : string.IsNullOrWhiteSpace(torrent.ClientReportedDownloadPath)
+                ? torrent.LocalDownloadPath!
+                : torrent.ClientReportedDownloadPath;
+
+        return CombineMappedPath(mappedPath, torrent.Category);
     }
 
     private static string GetContentPath(Torrent torrent, string savePath)

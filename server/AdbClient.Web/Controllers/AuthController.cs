@@ -1,8 +1,9 @@
-﻿using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
 using AdbClient.Data.Enums;
 using AdbClient.Service.Services;
 using AdbClient.Web.Models.Requests;
+using AdbClient.Web.Models.Responses;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
 namespace AdbClient.Web.Controllers;
 
@@ -27,17 +28,17 @@ public class AuthController(Authentication authentication, Settings settings) : 
             {
                 return StatusCode(402, "Setup required");
             }
-                
+
             return StatusCode(403);
         }
-            
+
         return Ok();
     }
 
     [AllowAnonymous]
     [Route("Create")]
     [HttpPost]
-    public async Task<ActionResult> Create([FromBody] AuthControllerLoginRequest? request)
+    public async Task<ActionResult<AuthControllerCreateResponse>> Create([FromBody] AuthControllerLoginRequest? request)
     {
         if (request == null)
         {
@@ -50,7 +51,7 @@ public class AuthController(Authentication authentication, Settings settings) : 
         {
             return StatusCode(401);
         }
-        
+
         if (string.IsNullOrEmpty(request.UserName) || string.IsNullOrEmpty(request.Password))
         {
             return BadRequest("Invalid UserName or Password");
@@ -62,10 +63,11 @@ public class AuthController(Authentication authentication, Settings settings) : 
         {
             return BadRequest(registerResult.Errors.First().Description);
         }
-            
+
         await authentication.Login(request.UserName, request.Password);
 
-        return Ok();
+        return Ok(new AuthControllerCreateResponse(
+            !string.IsNullOrWhiteSpace(Settings.Get.Provider.ApiKey)));
     }
 
     [Authorize(Policy = "AuthSetting")]
@@ -124,7 +126,7 @@ public class AuthController(Authentication authentication, Settings settings) : 
 
         return Ok();
     }
-        
+
     [Route("Logout")]
     [HttpPost]
     public async Task<ActionResult> Logout()
@@ -132,7 +134,7 @@ public class AuthController(Authentication authentication, Settings settings) : 
         await authentication.Logout();
         return Ok();
     }
-                
+
     [Route("Update")]
     [HttpPost]
     [Authorize(Policy = "AuthSetting")]
@@ -143,9 +145,9 @@ public class AuthController(Authentication authentication, Settings settings) : 
             return BadRequest();
         }
 
-        if (string.IsNullOrEmpty(request.UserName) || string.IsNullOrEmpty(request.Password))
+        if (string.IsNullOrWhiteSpace(request.UserName) && string.IsNullOrWhiteSpace(request.Password))
         {
-            return BadRequest("Invalid UserName or Password");
+            return BadRequest("Enter a new username, password, or both.");
         }
 
         var updateResult = await authentication.Update(request.UserName, request.Password);

@@ -1,49 +1,96 @@
-import { Component, OnInit, inject } from '@angular/core';
+import {
+  Component,
+  DestroyRef,
+  ElementRef,
+  OnInit,
+  afterNextRender,
+  computed,
+  inject,
+  signal,
+  viewChild,
+} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { Router } from '@angular/router';
+import { RouterLink } from '@angular/router';
 import { Torrent } from '../models/torrent.model';
 import { TorrentService } from '../torrent.service';
 import { forkJoin, Observable } from 'rxjs';
 import { FormsModule } from '@angular/forms';
 import { NgClass, DecimalPipe, DatePipe } from '@angular/common';
 import { TorrentStatusPipe } from '../torrent-status.pipe';
-import { SortPipe } from '../sort.pipe';
 import { FileSizePipe } from '../filesize.pipe';
-import { FilterPipe } from '../filter.pipe';
+import { ColumnResizeDirective } from '../shared/column-resize/column-resize.directive';
+import {
+  maxColumnWidth,
+  pruneTorrentSelection,
+  resizeTorrentColumn,
+  selectionColumnWidth,
+  selectVisibleTorrents,
+  torrentColumnLayout,
+  visibleSelectionState,
+  visibleTorrents,
+  type SortDirection,
+  type TorrentSortKey,
+} from './torrent-table-state';
 
 @Component({
   selector: 'app-torrent-table',
+  host: { class: 'page-layout' },
   templateUrl: './torrent-table.component.html',
   styleUrls: ['./torrent-table.component.scss'],
-  imports: [FormsModule, NgClass, DecimalPipe, DatePipe, TorrentStatusPipe, SortPipe, FileSizePipe, FilterPipe],
+  imports: [
+    FormsModule,
+    NgClass,
+    DecimalPipe,
+    DatePipe,
+    TorrentStatusPipe,
+    FileSizePipe,
+    RouterLink,
+    ColumnResizeDirective,
+  ],
   standalone: true,
 })
 export class TorrentTableComponent implements OnInit {
-  private router = inject(Router);
   private torrentService = inject(TorrentService);
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly tableContainer = viewChild.required<ElementRef<HTMLElement>>('tableContainer');
+  private readonly containerWidth = signal(0);
+  private readonly columnWidths = signal<Partial<Record<TorrentSortKey, number>>>({});
 
-  public torrents: Torrent[] = [];
-  public selectedTorrents: string[] = [];
-  public error: string;
-  public sortProperty = 'rdName';
-  public sortDirection: 'asc' | 'desc' = 'asc';
-  public filterText = '';
+  public readonly torrents = signal<Torrent[]>([]);
+  public readonly loading = signal(true);
+  public readonly selectedTorrents = signal<string[]>([]);
+  public readonly error = signal<string | null>(null);
+  public readonly selectionColumnWidth = selectionColumnWidth;
+  public readonly maxColumnWidth = maxColumnWidth;
+  public readonly columnLayout = computed(() => torrentColumnLayout(this.containerWidth(), this.columnWidths()));
+  public readonly columnsResized = computed(() => Object.keys(this.columnWidths()).length > 0);
+  public readonly sortProperty = signal<TorrentSortKey>('rdName');
+  public readonly sortDirection = signal<SortDirection>('asc');
+  public readonly filterText = signal('');
+  public readonly visibleTorrents = computed(() =>
+    visibleTorrents(this.torrents(), this.filterText(), this.sortProperty(), this.sortDirection())
+  );
+  private readonly visibleSelection = computed(() =>
+    visibleSelectionState(this.selectedTorrents(), this.visibleTorrents())
+  );
+  public readonly allVisibleSelected = computed(() => this.visibleSelection().all);
+  public readonly someVisibleSelected = computed(() => this.visibleSelection().some);
 
-  public isDeleteModalActive: boolean;
-  public deleteError: string;
-  public deleting: boolean;
+  public readonly isDeleteModalActive = signal(false);
+  public readonly deleteError = signal<string | null>(null);
+  public readonly deleting = signal(false);
   public deleteSelectAll: boolean;
   public deleteData: boolean;
   public deleteRdTorrent: boolean;
   public deleteLocalFiles: boolean;
 
-  public isRetryModalActive: boolean;
-  public retryError: string;
-  public retrying: boolean;
+  public readonly isRetryModalActive = signal(false);
+  public readonly retryError = signal<string | null>(null);
+  public readonly retrying = signal(false);
 
-  public isChangeSettingsModalActive: boolean;
-  public changeSettingsError: string;
-  public changingSettings: boolean;
+  public readonly isChangeSettingsModalActive = signal(false);
+  public readonly changeSettingsError = signal<string | null>(null);
+  public readonly changingSettings = signal(false);
 
   public updateSettingsDownloadClient: number;
   public updateSettingsHostDownloadAction: number;
@@ -55,136 +102,157 @@ export class TorrentTableComponent implements OnInit {
   public updateSettingsTorrentLifetime: number;
 
   constructor() {
-    const torrentService = this.torrentService;
-
-    torrentService.update$.pipe(takeUntilDestroyed()).subscribe((result) => {
-      this.torrents = result;
+    afterNextRender(() => {
+      const observer = new ResizeObserver(([entry]) => this.containerWidth.set(Math.floor(entry.contentRect.width)));
+      observer.observe(this.tableContainer().nativeElement);
+      this.destroyRef.onDestroy(() => observer.disconnect());
+    });
+    this.torrentService.update$.pipe(takeUntilDestroyed()).subscribe((result) => {
+      this.setTorrents(result);
     });
   }
 
   ngOnInit(): void {
     this.torrentService.getList().subscribe({
       next: (result) => {
-        this.torrents = result;
+        this.setTorrents(result);
       },
       error: (err) => {
-        this.error = err.error;
+        this.loading.set(false);
+        this.error.set(typeof err.error === 'string' ? err.error : 'The torrent list could not be loaded.');
       },
     });
   }
 
-  public sort(property: string): void {
-    this.sortDirection = this.sortProperty === property ? (this.sortDirection === 'asc' ? 'desc' : 'asc') : 'asc';
-    this.sortProperty = property;
+  private setTorrents(torrents: Torrent[]): void {
+    this.loading.set(false);
+    this.error.set(null);
+    this.torrents.set(torrents);
+    this.selectedTorrents.update((selectedIds) => pruneTorrentSelection(selectedIds, torrents));
   }
 
-  public sortIcon(property: string): Record<string, boolean> {
-    const active = this.sortProperty === property;
+  public resizeColumn(key: TorrentSortKey, width: number | null): void {
+    this.columnWidths.update((widths) => resizeTorrentColumn(widths, this.columnLayout(), key, width));
+  }
+
+  public resetColumns(): void {
+    this.columnWidths.set({});
+  }
+
+  public sort(property: TorrentSortKey): void {
+    this.sortDirection.update((direction) =>
+      this.sortProperty() === property && direction === 'asc' ? 'desc' : 'asc'
+    );
+    this.sortProperty.set(property);
+  }
+
+  public sortIcon(property: TorrentSortKey): Record<string, boolean> {
+    const active = this.sortProperty() === property;
     return {
       'fa-sort': !active,
-      'fa-sort-up': active && this.sortDirection === 'asc',
-      'fa-sort-down': active && this.sortDirection === 'desc',
+      'fa-sort-up': active && this.sortDirection() === 'asc',
+      'fa-sort-down': active && this.sortDirection() === 'desc',
       'sort-active': active,
     };
   }
 
-  public openTorrent(torrentId: string): void {
-    this.router.navigate([`/torrent/${torrentId}`]);
+  public sortAria(property: TorrentSortKey): 'ascending' | 'descending' | 'none' {
+    return this.sortProperty() === property ? (this.sortDirection() === 'asc' ? 'ascending' : 'descending') : 'none';
   }
 
-  public toggleDeleteSelectAll(event: Event) {
-    this.selectedTorrents = [];
-
-    if ((event.target as HTMLInputElement).checked) {
-      this.torrents.forEach((torrent) => {
-        this.selectedTorrents.push(torrent.torrentId);
-      });
-    }
+  public toggleSelectVisible(event: Event): void {
+    const selected = (event.target as HTMLInputElement).checked;
+    this.selectedTorrents.update((selectedIds) => selectVisibleTorrents(selectedIds, this.visibleTorrents(), selected));
   }
 
   public toggleSelect(torrentId: string) {
-    const index = this.selectedTorrents.indexOf(torrentId);
-
-    if (index > -1) {
-      this.selectedTorrents.splice(index, 1);
-    } else {
-      this.selectedTorrents.push(torrentId);
-    }
+    this.selectedTorrents.update((selectedTorrents) =>
+      selectedTorrents.includes(torrentId)
+        ? selectedTorrents.filter((selectedTorrentId) => selectedTorrentId !== torrentId)
+        : [...selectedTorrents, torrentId]
+    );
   }
 
   public showDeleteModal(): void {
+    this.deleteSelectAll = false;
     this.deleteData = false;
     this.deleteRdTorrent = false;
     this.deleteLocalFiles = false;
-    this.deleteError = null;
+    this.deleteError.set(null);
 
-    this.isDeleteModalActive = true;
+    this.isDeleteModalActive.set(true);
   }
 
   public deleteCancel(): void {
-    this.isDeleteModalActive = false;
+    this.isDeleteModalActive.set(false);
   }
 
   public deleteOk(): void {
-    this.deleting = true;
+    if (!this.hasDeleteAction()) {
+      this.deleteError.set('Select at least one delete action.');
+      return;
+    }
+
+    this.deleting.set(true);
 
     const calls: Observable<void>[] = [];
 
-    this.selectedTorrents.forEach((torrentId) => {
+    this.selectedTorrents().forEach((torrentId) => {
       calls.push(this.torrentService.delete(torrentId, this.deleteData, this.deleteRdTorrent, this.deleteLocalFiles));
     });
 
     forkJoin(calls).subscribe({
       complete: () => {
-        this.isDeleteModalActive = false;
-        this.deleting = false;
+        this.isDeleteModalActive.set(false);
+        this.deleting.set(false);
 
-        this.selectedTorrents = [];
+        this.selectedTorrents.set([]);
       },
       error: (err) => {
-        this.deleteError = err.error;
-        this.deleting = false;
+        this.deleteError.set(err.error);
+        this.deleting.set(false);
       },
     });
   }
 
   public showRetryModal(): void {
-    this.retryError = null;
+    this.retryError.set(null);
 
-    this.isRetryModalActive = true;
+    this.isRetryModalActive.set(true);
   }
 
   public retryCancel(): void {
-    this.isRetryModalActive = false;
+    this.isRetryModalActive.set(false);
   }
 
   public retryOk(): void {
-    this.retrying = true;
+    this.retrying.set(true);
 
     const calls: Observable<void>[] = [];
 
-    this.selectedTorrents.forEach((torrentId) => {
+    this.selectedTorrents().forEach((torrentId) => {
       calls.push(this.torrentService.retry(torrentId));
     });
 
     forkJoin(calls).subscribe({
       complete: () => {
-        this.isRetryModalActive = false;
-        this.retrying = false;
+        this.isRetryModalActive.set(false);
+        this.retrying.set(false);
 
-        this.selectedTorrents = [];
+        this.selectedTorrents.set([]);
       },
       error: (err) => {
-        this.retryError = err.error;
-        this.retrying = false;
+        this.retryError.set(err.error);
+        this.retrying.set(false);
       },
     });
   }
 
   public changeSettingsModal(): void {
-    this.changeSettingsError = null;
+    this.changeSettingsError.set(null);
 
-    const selected = this.torrents.filter((m) => this.selectedTorrents.includes(m.torrentId));
+    const selectedTorrents = this.selectedTorrents();
+    const selected = this.torrents().filter((torrent) => selectedTorrents.includes(torrent.torrentId));
     const cv = <V>(getter: (t: Torrent) => V) => this.consensus(selected, getter);
 
     this.updateSettingsDownloadClient = cv((m) => m.downloadClient);
@@ -196,26 +264,31 @@ export class TorrentTableComponent implements OnInit {
     this.updateSettingsDeleteOnError = cv((m) => m.deleteOnError);
     this.updateSettingsTorrentLifetime = cv((m) => m.lifetime);
 
-    this.isChangeSettingsModalActive = true;
+    this.isChangeSettingsModalActive.set(true);
   }
 
   private consensus<V>(items: Torrent[], getter: (item: Torrent) => V): V | null {
+    if (items.length === 0) {
+      return null;
+    }
     const first = getter(items[0]);
     return items.every((item) => getter(item) === first) ? first : null;
   }
 
   public changeSettingsCancel(): void {
-    this.isChangeSettingsModalActive = false;
+    this.isChangeSettingsModalActive.set(false);
   }
 
   public changeSettingsOk(): void {
-    this.changingSettings = true;
+    this.changingSettings.set(true);
 
     const calls: Observable<void>[] = [];
 
-    const selectedTorrents = this.torrents.filter((m) => this.selectedTorrents.indexOf(m.torrentId) > -1);
+    const selectedTorrentIds = this.selectedTorrents();
+    const selectedTorrents = this.torrents().filter((torrent) => selectedTorrentIds.includes(torrent.torrentId));
 
-    selectedTorrents.forEach((torrent) => {
+    selectedTorrents.forEach((currentTorrent) => {
+      const torrent = { ...currentTorrent };
       if (this.updateSettingsDownloadClient != null) {
         torrent.downloadClient = this.updateSettingsDownloadClient;
       }
@@ -246,14 +319,14 @@ export class TorrentTableComponent implements OnInit {
 
     forkJoin(calls).subscribe({
       complete: () => {
-        this.isChangeSettingsModalActive = false;
-        this.changingSettings = false;
+        this.isChangeSettingsModalActive.set(false);
+        this.changingSettings.set(false);
 
-        this.selectedTorrents = [];
+        this.selectedTorrents.set([]);
       },
       error: (err) => {
-        this.changeSettingsError = err.error;
-        this.changingSettings = false;
+        this.changeSettingsError.set(err.error);
+        this.changingSettings.set(false);
       },
     });
   }
@@ -265,5 +338,9 @@ export class TorrentTableComponent implements OnInit {
 
   updateDeleteSelectAll() {
     this.deleteSelectAll = this.deleteData && this.deleteRdTorrent && this.deleteLocalFiles;
+  }
+
+  public hasDeleteAction(): boolean {
+    return this.deleteData || this.deleteRdTorrent || this.deleteLocalFiles;
   }
 }

@@ -4,15 +4,14 @@ export class Torrent {
   public torrentId: string;
   public hash: string;
   public category: string;
+  public readonly externalClientRemoved?: boolean;
   public downloadClient: number;
   public hostDownloadAction: number;
-  public downloadAction: number;
   public finishedAction: number;
   public finishedActionDelay: number;
   public downloadMinSize: number;
   public includeRegex: string;
   public excludeRegex: string;
-  public downloadManualFiles: string;
 
   public added: Date;
   public filesSelected: Date;
@@ -41,7 +40,6 @@ export class Torrent {
   public rdAdded: Date;
   public rdEnded: Date;
   public rdSpeed: number;
-  public rdSeeders: number;
   public rdFiles: string;
 
   public files: TorrentFile[];
@@ -55,11 +53,6 @@ export class TorrentFile {
   public selected: boolean;
 
   public download: Download;
-}
-
-export class TorrentFileAvailability {
-  public filename: string;
-  public filesize: number;
 }
 
 export enum ProviderStatus {

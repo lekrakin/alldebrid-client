@@ -4,7 +4,6 @@ import { AddNewTorrentComponent } from './add-new-torrent/add-new-torrent.compon
 import { authResolver } from './auth-resolver.service';
 import { LoginComponent } from './login/login.component';
 import { MainLayoutComponent } from './main-layout/main-layout.component';
-import { ProfileComponent } from './profile/profile.component';
 import { SettingsComponent } from './settings/settings.component';
 import { SetupComponent } from './setup/setup.component';
 import { TorrentTableComponent } from './torrent-table/torrent-table.component';
@@ -34,6 +33,7 @@ const routes: Routes = [
       {
         path: 'torrents',
         component: TorrentTableComponent,
+        data: { wide: true },
       },
       {
         path: 'index.html',
@@ -54,7 +54,8 @@ const routes: Routes = [
       },
       {
         path: 'profile',
-        component: ProfileComponent,
+        redirectTo: 'settings',
+        pathMatch: 'full',
       },
       {
         path: '**',

@@ -7,6 +7,11 @@ export class TorrentStatusPipe implements PipeTransform {
   private pipe = inject(FileSizePipe);
 
   transform(torrent: Torrent): string {
+    const status = this.getDownloadStatus(torrent);
+    return torrent.externalClientRemoved ? `${status} · client cleared` : status;
+  }
+
+  private getDownloadStatus(torrent: Torrent): string {
     if (torrent.error) {
       return torrent.error;
     }
@@ -77,9 +82,6 @@ export class TorrentStatusPipe implements PipeTransform {
       case ProviderStatus.Queued:
         return 'Not Yet Added to Provider';
       case ProviderStatus.Downloading:
-        if (torrent.rdSeeders < 1) {
-          return `Torrent stalled`;
-        }
         const speed = this.pipe.transform(torrent.rdSpeed, 'filesize');
         return `Torrent downloading (${torrent.rdProgress}% - ${speed}/s)`;
       case ProviderStatus.Processing:

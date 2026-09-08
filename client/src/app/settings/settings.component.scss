@@ -1,54 +1,82 @@
-.settings-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1rem 2rem;
-  align-items: start;
+.settings-heading {
   margin-bottom: 1.5rem;
-
-  // Section headers (Object type) span all columns
-  .settings-section {
-    grid-column: 1 / -1;
-    font-size: 1rem;
-    font-weight: 600;
-    border-bottom: 1px solid var(--bulma-border);
-    padding-bottom: 0.35rem;
-    margin: 0.5rem 0 0.1rem;
-  }
-
-  // String and Enum fields span all columns; Int32 and Boolean stay compact
-  .field:not(.field-compact) {
-    grid-column: 1 / -1;
-  }
-
-  &--two-col {
-    grid-template-columns: repeat(2, 1fr);
-
-    .field:not(.field-compact) {
-      grid-column: unset;
-    }
-
-    .settings-section {
-      grid-column: 1 / -1;
-    }
-  }
 }
 
-@media (max-width: 1023px) {
-  .settings-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
+.loading-state {
+  max-width: 30rem;
+  padding: 2rem 0;
 }
 
-@media (max-width: 599px) {
-  .settings-grid {
+.settings-tabs {
+  overflow-x: auto;
+}
+
+.settings-tabs ul {
+  min-width: max-content;
+}
+
+.settings-tab {
+  appearance: none;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 0.5em 1em;
+}
+
+.settings-tab:hover,
+.settings-tab:focus-visible {
+  color: var(--bulma-link-text);
+}
+
+.settings-tab:focus-visible {
+  outline: 2px solid var(--bulma-link-text);
+  outline-offset: -2px;
+}
+
+.settings-tabs li.is-active .settings-tab {
+  border-bottom-color: var(--bulma-link-text);
+  color: var(--bulma-link-text);
+}
+
+.settings-grid,
+.diagnostics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.25rem 2rem;
+  align-items: start;
+  margin-bottom: 1.75rem;
+}
+
+.settings-section,
+.field-wide {
+  grid-column: 1 / -1;
+}
+
+.settings-section {
+  border-bottom: 1px solid var(--bulma-border);
+  padding-bottom: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.diagnostic-card {
+  height: 100%;
+}
+
+.account-panel {
+  max-width: 40rem;
+}
+
+@media (max-width: 768px) {
+  .settings-grid,
+  .diagnostics-grid {
     grid-template-columns: 1fr;
+  }
 
-    .field:not(.field-compact) {
-      grid-column: 1;
-    }
-
-    &--two-col {
-      grid-template-columns: 1fr;
-    }
+  .settings-section,
+  .field-wide {
+    grid-column: 1;
   }
 }

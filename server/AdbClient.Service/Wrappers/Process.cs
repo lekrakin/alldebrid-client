@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 
 namespace AdbClient.Service.Wrappers;
 
@@ -31,6 +31,11 @@ public class Process : IProcess
     {
         _process.ErrorDataReceived += (sender, args) => ErrorDataReceived?.Invoke(sender, args.Data);
         _process.BeginErrorReadLine();
+    }
+
+    public void Kill(bool entireProcessTree)
+    {
+        _process.Kill(entireProcessTree);
     }
 
     public bool WaitForExit(int milliseconds)

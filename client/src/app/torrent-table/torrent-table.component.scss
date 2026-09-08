@@ -1,4 +1,48 @@
+.table-container {
+  overflow-x: auto;
+}
+
 table {
+  table-layout: fixed;
+
+  th,
+  td {
+    white-space: nowrap;
+  }
+
+  th {
+    position: relative;
+    padding-right: 1rem;
+  }
+
+  td {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .sort-button {
+    appearance: none;
+    background: none;
+    border: 0;
+    color: inherit;
+    cursor: pointer;
+    font: inherit;
+    max-width: 100%;
+    overflow: hidden;
+    padding: 0;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+
+    &:hover {
+      color: var(--bulma-link-text);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--bulma-link);
+      outline-offset: 4px;
+    }
+  }
+
   thead th i.fas {
     font-size: 0.7em;
     margin-left: 4px;
@@ -10,10 +54,46 @@ table {
     }
   }
 
-  tr {
-    cursor: pointer;
-    td.break-all {
-      word-break: break-all;
+  .torrent-name a {
+    color: inherit;
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+
+    &:hover {
+      color: var(--bulma-link-text);
+      text-decoration: underline;
     }
+  }
+}
+
+.column-resize-handle {
+  position: absolute;
+  inset-block: 0;
+  right: 0;
+  width: 10px;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+
+  &::after {
+    content: '';
+    position: absolute;
+    inset-block: 25%;
+    right: 4px;
+    width: 1px;
+    background: var(--bulma-border);
+  }
+
+  &:hover::after,
+  &:focus-visible::after,
+  &.is-resizing::after {
+    background: var(--bulma-link);
+    width: 2px;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--bulma-link);
+    outline-offset: -2px;
   }
 }

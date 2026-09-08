@@ -62,6 +62,10 @@ jobs:
         working-directory: client
         run: npm run format:check
 
+      - name: Test frontend contracts
+        working-directory: client
+        run: npm test
+
       - name: Build
         working-directory: client
         run: npm run build
@@ -99,6 +103,18 @@ jobs:
           if ($failed) {
             exit 1
           }
+
+      - name: Verify service data-path guards
+        shell: powershell
+        run: .\tools\test-service-paths.ps1
+
+      - name: Verify service update and rollback transactions
+        shell: powershell
+        run: .\tools\test-service-update.ps1
+
+      - name: Verify deployment elevation and dry runs
+        shell: powershell
+        run: .\tools\test-service-deploy-launch.ps1
 
   container:
     name: Container

@@ -1,12 +1,12 @@
-﻿using Microsoft.Extensions.Logging;
+using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Text.Json;
 using AdbClient.Data.Enums;
 using AdbClient.Data.Models.Data;
 using AdbClient.Data.Models.Internal;
 using AdbClient.Service.Helpers;
 using AdbClient.Service.Services.Downloaders;
-using System.Collections.Concurrent;
-using System.Diagnostics;
-using System.Text.Json;
+using Microsoft.Extensions.Logging;
 
 namespace AdbClient.Service.Services;
 
@@ -66,23 +66,16 @@ public class TorrentRunner(ILogger<TorrentRunner> logger, Torrents torrents, Dow
             return;
         }
 
-        var settingDownloadLimit = Settings.Get.General.DownloadLimit;
+        var settingDownloadLimit = Settings.Get.Downloads.ConcurrentFiles;
         if (settingDownloadLimit < 1)
         {
             settingDownloadLimit = 1;
         }
 
-        var settingUnpackLimit = Settings.Get.General.UnpackLimit;
+        var settingUnpackLimit = Settings.Get.Downloads.ConcurrentExtractions;
         if (settingUnpackLimit < 0)
         {
             settingUnpackLimit = 0;
-        }
-
-        var settingDownloadPath = Settings.Get.Paths.DownloadPath;
-        if (string.IsNullOrWhiteSpace(settingDownloadPath))
-        {
-            logger.LogError("No DownloadPath set in settings");
-            return;
         }
 
         var sw = new Stopwatch();
@@ -281,7 +274,7 @@ public class TorrentRunner(ILogger<TorrentRunner> logger, Torrents torrents, Dow
         {
             var downloadingTorrentsCount = allTorrents.Count(m => m.RdStatus is not (TorrentStatus.Queued or TorrentStatus.Finished or TorrentStatus.Error));
 
-            var maxParallelDownloads = Settings.Get.DownloadClient.MaxParallelDownloads;
+            var maxParallelDownloads = Settings.Get.Provider.ConcurrentTorrents;
 
             logger.LogDebug("Currently downloading {downloadingTorrentCount}/{maxParallelDownloads} torrents, {queuedCount} queued.",
                             downloadingTorrentsCount,
@@ -404,7 +397,7 @@ public class TorrentRunner(ILogger<TorrentRunner> logger, Torrents torrents, Dow
                         return;
                     }
 
-                    var downloadPath = DownloadHelper.GetCategoryPath(settingDownloadPath, torrent.Category);
+                    var downloadPath = torrents.DownloadPath(torrent);
 
                     Log($"Marking download as started", download, torrent);
 
@@ -497,7 +490,7 @@ public class TorrentRunner(ILogger<TorrentRunner> logger, Torrents torrents, Dow
                         continue;
                     }
 
-                    var downloadPath = DownloadHelper.GetCategoryPath(settingDownloadPath, torrent.Category);
+                    var downloadPath = torrents.DownloadPath(torrent);
 
                     download.UnpackingStarted = DateTimeOffset.UtcNow;
                     await downloads.UpdateUnpackingStarted(download.DownloadId, download.UnpackingStarted);

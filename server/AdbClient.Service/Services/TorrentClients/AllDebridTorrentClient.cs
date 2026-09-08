@@ -77,8 +77,7 @@ public class AllDebridTorrentClient(ILogger<AllDebridTorrentClient> logger, IAll
             Files = files,
             Links = [],
             Ended = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddSeconds(torrent.CompletionDate ?? 0),
-            Speed = torrent.DownloadSpeed,
-            Seeders = torrent.Seeders
+            Speed = torrent.DownloadSpeed
         };
     }
 
@@ -211,7 +210,6 @@ public class AllDebridTorrentClient(ILogger<AllDebridTorrentClient> logger, IAll
             torrent.RdAdded = torrentClientTorrent.Added;
             torrent.RdEnded = torrentClientTorrent.Ended;
             torrent.RdSpeed = torrentClientTorrent.Speed;
-            torrent.RdSeeders = torrentClientTorrent.Seeders;
             torrent.RdStatusRaw = torrentClientTorrent.Status;
 
             torrent.RdStatus = torrentClientTorrent.StatusCode switch

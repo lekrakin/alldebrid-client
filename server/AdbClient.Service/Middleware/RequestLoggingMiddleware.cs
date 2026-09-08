@@ -1,53 +1,105 @@
-﻿using Microsoft.AspNetCore.Http;
+using System.Diagnostics;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
-using System.Text;
 
 namespace AdbClient.Service.Middleware;
 
-public class RequestLoggingMiddleware(RequestDelegate next, ILoggerFactory loggerFactory)
+public sealed class RequestLoggingMiddleware(
+    RequestDelegate next,
+    ILogger<RequestLoggingMiddleware> logger)
 {
-    private readonly ILogger _logger = loggerFactory.CreateLogger<RequestLoggingMiddleware>();
-
-    public async Task Invoke(HttpContext context)
+    private static readonly HashSet<string> LoggedEndpoints = new(StringComparer.OrdinalIgnoreCase)
     {
-        if (!_logger.IsEnabled(LogLevel.Debug) || (!context.Request.Path.StartsWithSegments("/api/v2") && !context.Request.Path.StartsWithSegments("/api/torrents")))
+        "/api/v2/auth/login",
+        "/api/v2/app/version",
+        "/api/v2/app/webapiVersion",
+        "/api/v2/app/preferences",
+        "/api/v2/app/defaultSavePath",
+        "/api/v2/torrents/categories",
+        "/api/v2/torrents/createCategory",
+        "/api/v2/torrents/add",
+        "/api/v2/torrents/info",
+        "/api/v2/torrents/properties",
+        "/api/v2/torrents/files",
+        "/api/v2/torrents/setCategory",
+        "/api/v2/torrents/topPrio",
+        "/api/v2/torrents/setShareLimits",
+        "/api/v2/torrents/setForceStart",
+        "/api/v2/torrents/delete",
+        "/api/torrents",
+        "/api/torrents/tick",
+        "/api/torrents/uploadFile",
+        "/api/torrents/uploadMagnet",
+        "/api/torrents/checkFiles",
+        "/api/torrents/checkFilesMagnet",
+        "/api/torrents/update",
+        "/api/torrents/verifyRegex"
+    };
+
+    private static readonly HashSet<string> LoggedTorrentIdActions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "get",
+        "delete",
+        "retry",
+        "retryDownload"
+    };
+
+    public async Task InvokeAsync(HttpContext context)
+    {
+        var loggedPath = logger.IsEnabled(LogLevel.Debug)
+            ? GetLoggedPath(context.Request.Path)
+            : null;
+
+        if (loggedPath is null)
         {
             await next(context);
 
             return;
         }
 
-        var requestLog = $"Method: {context.Request.Method}, Path: {context.Request.Path}";
+        var stopwatch = Stopwatch.StartNew();
 
-        if (context.Request.QueryString.HasValue)
+        try
         {
-            requestLog += $", QueryString: {context.Request.QueryString}";
+            await next(context);
         }
-
-        if (context.Request.HasFormContentType && context.Request.Form.Count > 0)
+        finally
         {
-            requestLog += $", Form: {string.Join(", ", context.Request.Form.Select(f => $"{f.Key}: {f.Value}"))}";
+            stopwatch.Stop();
+            logger.LogDebug(
+                "HTTP {Method} {Path} responded {StatusCode} in {ElapsedMilliseconds:0.###} ms",
+                context.Request.Method,
+                loggedPath,
+                context.Response.StatusCode,
+                stopwatch.Elapsed.TotalMilliseconds);
         }
-        else if (context.Request.ContentType?.Contains("application/json", StringComparison.CurrentCultureIgnoreCase) == true)
-        {
-            var body = await ReadRequestBodyAsync(context.Request);
-            requestLog += $", Body: {body}";
-        }
-
-        _logger.LogDebug(requestLog);
-
-        await next(context);
     }
 
-    private static async Task<string> ReadRequestBodyAsync(HttpRequest request)
+    private static string? GetLoggedPath(PathString path)
     {
-        request.EnableBuffering();
+        var value = path.Value?.TrimEnd('/');
 
-        using var reader = new StreamReader(request.Body, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, leaveOpen: true);
-        var body = await reader.ReadToEndAsync();
+        if (string.IsNullOrEmpty(value))
+        {
+            return null;
+        }
 
-        request.Body.Position = 0;
+        if (LoggedEndpoints.Contains(value))
+        {
+            return value;
+        }
 
-        return body;
+        if (!path.StartsWithSegments("/api/torrents", out var remaining))
+        {
+            return null;
+        }
+
+        var segments = remaining.Value?.Split('/', StringSplitOptions.RemoveEmptyEntries);
+
+        return segments is [var action, var id]
+               && LoggedTorrentIdActions.Contains(action)
+               && Guid.TryParse(id, out _)
+            ? $"/api/torrents/{action}/{{id}}"
+            : null;
     }
 }

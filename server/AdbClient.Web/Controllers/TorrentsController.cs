@@ -1,11 +1,12 @@
-﻿using System.Text.RegularExpressions;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
-using MonoTorrent;
+using System.Text.RegularExpressions;
+using AdbClient.Data.Helpers;
 using AdbClient.Data.Models.TorrentClient;
 using AdbClient.Service.Helpers;
 using AdbClient.Service.Services;
 using AdbClient.Web.Models.Requests;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using MonoTorrent;
 using Torrent = AdbClient.Data.Models.Data.Torrent;
 
 namespace AdbClient.Web.Controllers;
@@ -85,7 +86,15 @@ public class TorrentsController(ILogger<TorrentsController> logger, Torrents tor
 
         var bytes = memoryStream.ToArray();
 
-        await torrents.AddFileToDebridQueue(bytes, formData.Torrent);
+        try
+        {
+            await torrents.AddFileToDebridQueue(bytes, formData.Torrent);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidDataException)
+        {
+            logger.LogWarning(ex, "Rejected torrent file upload");
+            return BadRequest(ex.Message);
+        }
 
         return Ok();
     }
@@ -98,7 +107,7 @@ public class TorrentsController(ILogger<TorrentsController> logger, Torrents tor
         {
             return BadRequest();
         }
-        
+
         if (string.IsNullOrEmpty(request.MagnetLink))
         {
             return BadRequest("Invalid magnet link");
@@ -111,7 +120,15 @@ public class TorrentsController(ILogger<TorrentsController> logger, Torrents tor
 
         logger.LogDebug($"Add magnet");
 
-        await torrents.AddMagnetToDebridQueue(request.MagnetLink, request.Torrent);
+        try
+        {
+            await torrents.AddMagnetToDebridQueue(request.MagnetLink, request.Torrent);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidDataException)
+        {
+            logger.LogWarning(ex, "Rejected magnet upload");
+            return BadRequest(ex.Message);
+        }
 
         return Ok();
     }
@@ -170,6 +187,11 @@ public class TorrentsController(ILogger<TorrentsController> logger, Torrents tor
             return BadRequest();
         }
 
+        if (!request.DeleteData && !request.DeleteRdTorrent && !request.DeleteLocalFiles)
+        {
+            return BadRequest("Select at least one delete action.");
+        }
+
         logger.LogDebug("Delete {torrentId}", torrentId);
 
         await torrents.Delete(torrentId, request.DeleteData, request.DeleteRdTorrent, request.DeleteLocalFiles);
@@ -199,7 +221,7 @@ public class TorrentsController(ILogger<TorrentsController> logger, Torrents tor
 
         return Ok();
     }
-        
+
     [HttpPut]
     [Route("Update")]
     public async Task<ActionResult> Update([FromBody] Torrent? torrent)
@@ -255,43 +277,48 @@ public class TorrentsController(ILogger<TorrentsController> logger, Torrents tor
 
         var selectedFiles = new List<TorrentClientAvailableFile>();
 
-        if (!string.IsNullOrWhiteSpace(request.IncludeRegex))
+        var includePattern = !string.IsNullOrWhiteSpace(request.IncludeRegex) ? request.IncludeRegex : null;
+        var excludePattern = !string.IsNullOrWhiteSpace(request.ExcludeRegex) ? request.ExcludeRegex : null;
+        var pattern = includePattern ?? excludePattern;
+
+        if (pattern == null)
         {
-            foreach (var availableFile in availableFiles)
-            {
-                try
-                {
-                    if (Regex.IsMatch(availableFile.Filename, request.IncludeRegex))
-                    {
-                        selectedFiles.Add(availableFile);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    includeError = ex.Message;
-                }
-            }
-        } 
-        else if (!string.IsNullOrWhiteSpace(request.ExcludeRegex))
-        {
-            foreach (var availableFile in availableFiles)
-            {
-                try
-                {
-                    if (!Regex.IsMatch(availableFile.Filename, request.ExcludeRegex))
-                    {
-                        selectedFiles.Add(availableFile);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    excludeError = ex.Message;
-                }
-            }
+            selectedFiles = [.. availableFiles];
         }
         else
         {
-            selectedFiles = [.. availableFiles];
+            try
+            {
+                var regex = BoundedRegex.Create(pattern);
+                var includeMatches = includePattern != null;
+                selectedFiles = availableFiles
+                               .Where(file => regex.IsMatch(file.Filename) == includeMatches)
+                               .ToList();
+            }
+            catch (RegexMatchTimeoutException)
+            {
+                if (includePattern != null)
+                {
+                    includeError = BoundedRegex.TimeoutError;
+                }
+                else
+                {
+                    excludeError = BoundedRegex.TimeoutError;
+                }
+            }
+            catch (ArgumentException ex)
+            {
+                var error = $"Invalid regular expression: {ex.Message}";
+
+                if (includePattern != null)
+                {
+                    includeError = error;
+                }
+                else
+                {
+                    excludeError = error;
+                }
+            }
         }
 
         return Ok(new

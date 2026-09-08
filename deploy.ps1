@@ -4,12 +4,89 @@ param(
     [ValidatePattern('^[A-Za-z0-9_.-]+$')]
     [string]$ServiceName = "AllDebridClient",
     [ValidatePattern('^\d+\.\d+\.\d+$')]
-    [string]$Version
+    [string]$Version,
+    [Parameter(DontShow)]
+    [switch]$Elevated
 )
 
 $ErrorActionPreference = "Stop"
 $PSNativeCommandUseErrorActionPreference = $true
 $projectRoot = [System.IO.Path]::GetFullPath($PSScriptRoot).TrimEnd('\', '/')
+
+function Test-IsAdministrator {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function ConvertTo-SingleQuotedLiteral([string]$Value) {
+    return "'" + $Value.Replace("'", "''") + "'"
+}
+
+function Get-ElevatedDeploymentCommand([string]$ScriptPath, [string]$Root, [string]$Name, [string]$BuildVersion, [string]$OutputPath) {
+    $invocation = @(
+        '&', (ConvertTo-SingleQuotedLiteral $ScriptPath),
+        '-Elevated -Confirm:$false',
+        '-InstallRoot', (ConvertTo-SingleQuotedLiteral $Root),
+        '-ServiceName', (ConvertTo-SingleQuotedLiteral $Name),
+        '-Version', (ConvertTo-SingleQuotedLiteral $BuildVersion)
+    ) -join ' '
+    $outputLiteral = ConvertTo-SingleQuotedLiteral $OutputPath
+
+    return @"
+`$ErrorActionPreference = 'Stop'
+& {
+    try {
+        $invocation
+        exit 0
+    } catch {
+        `$_ | Out-String
+        exit 1
+    }
+} *> $outputLiteral
+"@
+}
+
+function Start-ElevatedDeployment([string]$ScriptPath, [string]$Root, [string]$Name, [string]$BuildVersion) {
+    # Windows cannot redirect an elevated process's streams directly. Relay its output
+    # through one temporary file; no helper script or permanent privileged task is needed.
+    $outputPath = [IO.Path]::GetTempFileName()
+    $reader = $null
+    $process = $null
+    try {
+        $command = Get-ElevatedDeploymentCommand $ScriptPath $Root $Name $BuildVersion $outputPath
+        $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
+        $powerShell = Join-Path $PSHOME $(if ($PSVersionTable.PSEdition -eq 'Core') { 'pwsh.exe' } else { 'powershell.exe' })
+        Write-Host '==> Approve the Windows administrator prompt to deploy. Build output will appear here.'
+        try {
+            $process = Start-Process -FilePath $powerShell `
+                                     -ArgumentList "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encodedCommand" `
+                                     -WorkingDirectory (Split-Path -Parent $ScriptPath) `
+                                     -Verb RunAs -WindowStyle Hidden -PassThru
+        } catch {
+            throw "Could not start deployment with administrator approval: $($_.Exception.Message)"
+        }
+
+        do {
+            $hasExited = $process.WaitForExit(250)
+            if ($null -eq $reader -and (Get-Item -LiteralPath $outputPath).Length -gt 0) {
+                $stream = [IO.File]::Open($outputPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+                $reader = [IO.StreamReader]::new($stream, [Text.Encoding]::UTF8, $true)
+            }
+            if ($null -ne $reader) {
+                while (-not $reader.EndOfStream) { Write-Host $reader.ReadLine() }
+            }
+        } while (-not $hasExited)
+
+        if ($process.ExitCode -ne 0) {
+            throw "Elevated deployment failed (exit code $($process.ExitCode)). See the output above."
+        }
+    } finally {
+        if ($null -ne $reader) { $reader.Dispose() }
+        if ($null -ne $process) { $process.Dispose() }
+        Remove-Item -LiteralPath $outputPath -Force
+    }
+}
 
 function Get-ServiceApplicationPath([string]$PathName) {
     $tokens = [regex]::Matches($PathName, '"([^"]+)"|(\S+)') | ForEach-Object {
@@ -21,6 +98,132 @@ function Get-ServiceApplicationPath([string]$PathName) {
     } | Select-Object -First 1
 }
 
+function Get-ServiceEnvironmentValues([string]$Name) {
+    $values = [Collections.Generic.Dictionary[string, string]]::new(
+        [StringComparer]::OrdinalIgnoreCase)
+
+    foreach ($settingName in @("Port", "BasePath", "BASE_PATH", "DataPath", "Database__Path", "Logging__File__Path")) {
+        $machineValue = [Environment]::GetEnvironmentVariable(
+            $settingName,
+            [EnvironmentVariableTarget]::Machine)
+        if ($null -ne $machineValue) {
+            $values[$settingName] = $machineValue
+        }
+    }
+
+    $serviceKey = "Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\$Name"
+    $serviceValues = Get-ItemProperty -LiteralPath $serviceKey `
+                                      -Name Environment `
+                                      -ErrorAction SilentlyContinue
+    if ($null -ne $serviceValues -and $null -ne $serviceValues.Environment) {
+        foreach ($entry in @($serviceValues.Environment)) {
+            $separator = $entry.IndexOf('=')
+            if ($separator -gt 0) {
+                $values[$entry.Substring(0, $separator)] = $entry.Substring($separator + 1)
+            }
+        }
+    }
+
+    return $values
+}
+
+function Get-CommandLineSetting([string]$PathName, [string]$Name) {
+    $pattern = '(?i)(?:^|\s)(?:--|/)?{0}(?:\s*=\s*|\s+)(?:"(?<quoted>[^"]*)"|(?<plain>\S*))' -f
+               [regex]::Escape($Name)
+    $matches = [regex]::Matches($PathName, $pattern)
+    if ($matches.Count -eq 0) {
+        return $null
+    }
+
+    $match = $matches[$matches.Count - 1]
+    if ($match.Groups["quoted"].Success) {
+        return $match.Groups["quoted"].Value
+    }
+
+    return $match.Groups["plain"].Value
+}
+
+function Get-ConfiguredValue($Settings, [string]$Key, $DefaultValue, $EnvironmentValues, [string]$PathName) {
+    $commandLineValue = Get-CommandLineSetting $PathName $Key
+    if ($null -ne $commandLineValue) {
+        return $commandLineValue
+    }
+
+    $environmentName = $Key.Replace(':', '__')
+    if ($EnvironmentValues.ContainsKey($environmentName)) {
+        return $EnvironmentValues[$environmentName]
+    }
+
+    $configuredValue = $Settings
+    foreach ($segment in $Key.Split(':')) {
+        if ($null -eq $configuredValue) {
+            return $DefaultValue
+        }
+
+        $property = $configuredValue.PSObject.Properties[$segment]
+        if ($null -eq $property) {
+            return $DefaultValue
+        }
+
+        $configuredValue = $property.Value
+    }
+
+    if ($null -eq $configuredValue) {
+        return $DefaultValue
+    }
+
+    return $configuredValue.ToString()
+}
+
+function Get-ServiceHealthUri([string]$SettingsPath, [string]$Name) {
+    $settings = Get-Content -LiteralPath $SettingsPath -Raw | ConvertFrom-Json
+    $managedService = Get-CimInstance Win32_Service -Filter "Name='$Name'" -ErrorAction Stop
+    $environment = Get-ServiceEnvironmentValues $Name
+
+    $portValue = if ($null -ne $settings.Port) { $settings.Port.ToString() } else { "6500" }
+    if ($environment.ContainsKey("Port")) {
+        $portValue = $environment["Port"]
+    }
+
+    $commandLinePort = Get-CommandLineSetting $managedService.PathName "Port"
+    if ($null -ne $commandLinePort) {
+        $portValue = $commandLinePort
+    }
+
+    $port = 0
+    if (-not [int]::TryParse($portValue, [ref]$port) -or $port -lt 1 -or $port -gt 65535) {
+        throw "The service's effective Port value is invalid: '$portValue'."
+    }
+
+    $basePathValue = if ($null -ne $settings.BasePath) { $settings.BasePath.ToString() } else { "" }
+    if ($environment.ContainsKey("BasePath")) {
+        $basePathValue = $environment["BasePath"]
+    }
+
+    $commandLineBasePath = Get-CommandLineSetting $managedService.PathName "BasePath"
+    if ($null -ne $commandLineBasePath) {
+        $basePathValue = $commandLineBasePath
+    }
+
+    if ([string]::IsNullOrWhiteSpace($basePathValue) -and $environment.ContainsKey("BASE_PATH")) {
+        $basePathValue = $environment["BASE_PATH"]
+    }
+
+    $basePath = if ([string]::IsNullOrWhiteSpace($basePathValue)) {
+        ""
+    } else {
+        $basePathValue.Trim().Trim('/')
+    }
+
+    $hasInvalidSegment = @($basePath.Split('/') | Where-Object { $_ -in @(".", "..") }).Count -gt 0
+    if ($basePath -ne "" -and
+        ($basePath -notmatch '^[-A-Za-z0-9._~]+(?:/[-A-Za-z0-9._~]+)*$' -or $hasInvalidSegment)) {
+        throw "The service's effective BasePath value is invalid: '$basePathValue'."
+    }
+
+    return "http://127.0.0.1:$port$(if ($basePath -eq '') { '' } else { "/$basePath" })/health"
+}
+
 function Assert-ChildPath([string]$Parent, [string]$Child) {
     $prefix = $Parent.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
     if (-not $Child.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
@@ -28,27 +231,108 @@ function Assert-ChildPath([string]$Parent, [string]$Child) {
     }
 }
 
-function Wait-ForHealth([int]$Port) {
+function Test-SameOrDescendantPath([string]$Parent, [string]$Candidate) {
+    $normalizedParent = [System.IO.Path]::GetFullPath($Parent).TrimEnd('\', '/')
+    $normalizedCandidate = [System.IO.Path]::GetFullPath($Candidate).TrimEnd('\', '/')
+
+    if ($normalizedCandidate.Equals($normalizedParent, [StringComparison]::OrdinalIgnoreCase)) {
+        return $true
+    }
+
+    $prefix = $normalizedParent + [System.IO.Path]::DirectorySeparatorChar
+    return $normalizedCandidate.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)
+}
+
+function Test-AbsolutePath([string]$Path) {
+    # IsPathRooted also accepts C:relative and \root-relative on Windows.
+    $normalized = $Path.Replace('/', '\')
+    return $normalized -match '^[A-Za-z]:\\' -or
+           $normalized -match '^\\\\(?![.?](?:\\|$))[^\\]+\\[^\\]+(?:\\|$)'
+}
+
+function Resolve-ConfiguredPath([string]$Path, [string]$SettingName) {
+    if (-not (Test-AbsolutePath $Path)) {
+        throw "$SettingName '$Path' is relative or not fully qualified. Configure an absolute path to its existing location before deploying. The previous process working directory cannot be inferred safely; do not create a new data location."
+    }
+
+    return [System.IO.Path]::GetFullPath($Path)
+}
+
+function Assert-PersistentPathsOutsideApplication([string[]]$PersistentPaths, [string]$ApplicationDirectory) {
+    foreach ($persistentPath in $PersistentPaths) {
+        if (Test-SameOrDescendantPath $ApplicationDirectory $persistentPath) {
+            throw "Persistent data path is inside the replaceable application directory. Move it outside $ApplicationDirectory before deploying: $persistentPath"
+        }
+    }
+}
+
+function Get-ManagedServiceState([string]$Name) {
+    $managedService = Get-CimInstance Win32_Service -Filter "Name='$Name'" -ErrorAction SilentlyContinue
+    if ($null -eq $managedService) {
+        throw "Windows service '$Name' was not found."
+    }
+
+    return $managedService.State
+}
+
+function Wait-ForServiceState([string]$Name, [string]$ExpectedState, [int]$TimeoutSeconds = 30) {
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    $lastState = $null
+
+    do {
+        $lastState = Get-ManagedServiceState $Name
+        if ($lastState -eq $ExpectedState) {
+            return
+        }
+
+        Start-Sleep -Milliseconds 500
+    } while ([DateTime]::UtcNow -lt $deadline)
+
+    throw "Windows service '$Name' did not reach state '$ExpectedState' within $TimeoutSeconds seconds (last state: '$lastState')."
+}
+
+function Stop-ManagedService([string]$Name) {
+    if ((Get-ManagedServiceState $Name) -eq "Stopped") {
+        return
+    }
+
+    Stop-Service -Name $Name -ErrorAction Stop
+    Wait-ForServiceState $Name "Stopped"
+}
+
+function Start-ManagedService([string]$Name) {
+    if ((Get-ManagedServiceState $Name) -eq "Running") {
+        return
+    }
+
+    Start-Service -Name $Name -ErrorAction Stop
+    Wait-ForServiceState $Name "Running"
+}
+
+function Wait-ForHealth([string]$ServiceName, [string]$Uri) {
     $deadline = [DateTime]::UtcNow.AddSeconds(45)
-    $uri = "http://127.0.0.1:$Port/health"
+    $lastError = "No HTTP response."
 
     do {
         try {
-            $response = Invoke-WebRequest -Uri $uri -TimeoutSec 5 -UseBasicParsing
+            $response = Invoke-WebRequest -Uri $Uri -TimeoutSec 5 -UseBasicParsing
             if ($response.StatusCode -eq 200) {
                 return
             }
+
+            $lastError = "HTTP $($response.StatusCode)."
         } catch {
-            Start-Sleep -Seconds 2
+            $lastError = $_.Exception.Message
         }
+
+        if ((Get-ManagedServiceState $ServiceName) -eq "Stopped") {
+            throw "Windows service '$ServiceName' stopped before its health check passed at $Uri. Last error: $lastError"
+        }
+
+        Start-Sleep -Seconds 2
     } while ([DateTime]::UtcNow -lt $deadline)
 
-    throw "The service did not become healthy at $uri within 45 seconds."
-}
-
-$principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
-if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    throw "Run this deployment from an Administrator PowerShell session."
+    throw "The service did not become healthy at $Uri within 45 seconds. Last error: $lastError"
 }
 
 $service = Get-CimInstance Win32_Service -Filter "Name='$ServiceName'" -ErrorAction SilentlyContinue
@@ -79,12 +363,10 @@ if ($InstallRoot -ieq $driveRoot -or $InstallRoot -ieq $projectRoot) {
 }
 
 $appDirectory = [System.IO.Path]::GetFullPath((Join-Path $InstallRoot "App"))
-$dataDirectory = [System.IO.Path]::GetFullPath((Join-Path $InstallRoot "Data"))
 $backupsDirectory = [System.IO.Path]::GetFullPath((Join-Path $InstallRoot "Backups"))
 $stagingDirectory = [System.IO.Path]::GetFullPath((Join-Path $InstallRoot ".staging-$([Guid]::NewGuid().ToString('N'))"))
 
 Assert-ChildPath $InstallRoot $appDirectory
-Assert-ChildPath $InstallRoot $dataDirectory
 Assert-ChildPath $InstallRoot $backupsDirectory
 Assert-ChildPath $InstallRoot $stagingDirectory
 
@@ -96,6 +378,42 @@ if (-not (Test-Path -LiteralPath $appDirectory -PathType Container)) {
     throw "Application directory not found: $appDirectory"
 }
 
+$currentSettingsPath = Join-Path $appDirectory "appsettings.json"
+if (-not (Test-Path -LiteralPath $currentSettingsPath -PathType Leaf)) {
+    throw "Startup configuration not found: $currentSettingsPath"
+}
+
+try {
+    $currentSettings = Get-Content -LiteralPath $currentSettingsPath -Raw | ConvertFrom-Json
+} catch {
+    throw "Startup configuration is not valid JSON: $currentSettingsPath"
+}
+
+$serviceEnvironment = Get-ServiceEnvironmentValues $ServiceName
+$configuredDataPath = Get-ConfiguredValue $currentSettings 'DataPath' './data' $serviceEnvironment $service.PathName
+if ([string]::IsNullOrWhiteSpace($configuredDataPath)) {
+    throw "The service's effective DataPath must not be blank."
+}
+
+$dataDirectory = Resolve-ConfiguredPath $configuredDataPath.Trim() 'DataPath'
+$persistentPaths = @($dataDirectory)
+
+$configuredDatabasePath = Get-ConfiguredValue $currentSettings 'Database:Path' $null $serviceEnvironment $service.PathName
+if ([string]::IsNullOrWhiteSpace($configuredDatabasePath)) {
+    $persistentPaths += Join-Path $dataDirectory 'adbclient.db'
+} else {
+    $persistentPaths += Resolve-ConfiguredPath $configuredDatabasePath.Trim() 'Database:Path'
+}
+
+$configuredLogPath = Get-ConfiguredValue $currentSettings 'Logging:File:Path' $null $serviceEnvironment $service.PathName
+if ([string]::IsNullOrWhiteSpace($configuredLogPath)) {
+    $persistentPaths += Join-Path $dataDirectory 'adbclient.log'
+} else {
+    $persistentPaths += Resolve-ConfiguredPath $configuredLogPath.Trim() 'Logging:File:Path'
+}
+
+Assert-PersistentPathsOutsideApplication $persistentPaths $appDirectory
+
 if ([string]::IsNullOrWhiteSpace($Version)) {
     $Version = (Get-Content -LiteralPath (Join-Path $projectRoot "version.txt") -Raw).Trim()
 }
@@ -104,28 +422,48 @@ if ($Version -notmatch '^\d+\.\d+\.\d+$') {
     throw "Invalid stable semantic version: $Version"
 }
 
-$wasRunning = $service.State -eq "Running"
-$backupDirectory = Join-Path $backupsDirectory "App-$((Get-Date).ToString('yyyyMMdd-HHmmss'))-$([Guid]::NewGuid().ToString('N').Substring(0, 8))"
-$failedDirectory = Join-Path $backupsDirectory "Failed-$((Get-Date).ToString('yyyyMMdd-HHmmss'))-$([Guid]::NewGuid().ToString('N').Substring(0, 8))"
+$initialServiceState = Get-ManagedServiceState $ServiceName
+if ($initialServiceState -eq "Start Pending") {
+    Wait-ForServiceState $ServiceName "Running"
+    $initialServiceState = "Running"
+} elseif ($initialServiceState -eq "Stop Pending") {
+    Wait-ForServiceState $ServiceName "Stopped"
+    $initialServiceState = "Stopped"
+} elseif ($initialServiceState -notin @("Running", "Stopped")) {
+    throw "Windows service '$ServiceName' must be running or stopped before deployment (current state: '$initialServiceState')."
+}
+
+$wasRunning = $initialServiceState -eq "Running"
+if (-not $PSCmdlet.ShouldProcess($appDirectory, "Build version $Version, stop $ServiceName, back up and replace App, and restore the service's running state")) {
+    return
+}
+
+if (-not (Test-IsAdministrator)) {
+    if ($Elevated) {
+        throw "The elevated process did not receive administrator rights. No deployment was performed."
+    }
+    Start-ElevatedDeployment $PSCommandPath $InstallRoot $ServiceName $Version
+    return
+}
+
+$backupDirectory = [System.IO.Path]::GetFullPath((Join-Path $backupsDirectory "App-$((Get-Date).ToString('yyyyMMdd-HHmmss'))-$([Guid]::NewGuid().ToString('N').Substring(0, 8))"))
+$failedDirectory = [System.IO.Path]::GetFullPath((Join-Path $backupsDirectory "Failed-$((Get-Date).ToString('yyyyMMdd-HHmmss'))-$([Guid]::NewGuid().ToString('N').Substring(0, 8))"))
+Assert-ChildPath $backupsDirectory $backupDirectory
+Assert-ChildPath $backupsDirectory $failedDirectory
 $backupCreated = $false
+$serviceStoppedForDeployment = $false
 
 try {
     Write-Host "==> Building version $Version into staging"
     & (Join-Path $projectRoot "publish.ps1") -InstallPath $stagingDirectory -DataPath $dataDirectory -Version $Version
 
-    $currentSettings = Join-Path $appDirectory "appsettings.json"
-    if (Test-Path -LiteralPath $currentSettings -PathType Leaf) {
-        Copy-Item -LiteralPath $currentSettings -Destination (Join-Path $stagingDirectory "appsettings.json") -Force
-    }
-
-    if (-not $PSCmdlet.ShouldProcess($appDirectory, "Stop $ServiceName, back up the current App directory, deploy version $Version, and restart")) {
-        return
-    }
+    Copy-Item -LiteralPath $currentSettingsPath -Destination (Join-Path $stagingDirectory "appsettings.json") -Force
 
     New-Item -ItemType Directory -Path $backupsDirectory -Force | Out-Null
 
     if ($wasRunning) {
-        Stop-Service -Name $ServiceName
+        Stop-ManagedService $ServiceName
+        $serviceStoppedForDeployment = $true
     }
 
     Move-Item -LiteralPath $appDirectory -Destination $backupDirectory
@@ -133,28 +471,39 @@ try {
     Move-Item -LiteralPath $stagingDirectory -Destination $appDirectory
 
     if ($wasRunning) {
-        Start-Service -Name $ServiceName
-        $settings = Get-Content -LiteralPath (Join-Path $appDirectory "appsettings.json") -Raw | ConvertFrom-Json
-        Wait-ForHealth ([int]$settings.Port)
+        Start-ManagedService $ServiceName
+        Wait-ForHealth $ServiceName (Get-ServiceHealthUri $currentSettingsPath $ServiceName)
+        $serviceStoppedForDeployment = $false
     }
 
     Write-Host "==> Deployment complete: $appDirectory"
     Write-Host "==> Previous version retained at: $backupDirectory"
 } catch {
     $deploymentError = $_
+    $rollbackError = $null
 
-    if ($backupCreated -and (Test-Path -LiteralPath $backupDirectory -PathType Container)) {
-        Stop-Service -Name $ServiceName -ErrorAction SilentlyContinue
+    try {
+        if ($backupCreated -and (Test-Path -LiteralPath $backupDirectory -PathType Container)) {
+            Stop-ManagedService $ServiceName
 
-        if (Test-Path -LiteralPath $appDirectory -PathType Container) {
-            Move-Item -LiteralPath $appDirectory -Destination $failedDirectory
+            if (Test-Path -LiteralPath $appDirectory -PathType Container) {
+                Move-Item -LiteralPath $appDirectory -Destination $failedDirectory
+            }
+
+            Move-Item -LiteralPath $backupDirectory -Destination $appDirectory
         }
 
-        Move-Item -LiteralPath $backupDirectory -Destination $appDirectory
-
-        if ($wasRunning) {
-            Start-Service -Name $ServiceName
+        if ($wasRunning -and ($serviceStoppedForDeployment -or $backupCreated)) {
+            Start-ManagedService $ServiceName
+            Wait-ForHealth $ServiceName (Get-ServiceHealthUri $currentSettingsPath $ServiceName)
+            $serviceStoppedForDeployment = $false
         }
+    } catch {
+        $rollbackError = $_
+    }
+
+    if ($null -ne $rollbackError) {
+        throw "Deployment failed: $($deploymentError.Exception.Message) Rollback also failed: $($rollbackError.Exception.Message)"
     }
 
     throw $deploymentError

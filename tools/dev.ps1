@@ -13,6 +13,7 @@ $root = Split-Path -Parent $PSScriptRoot
 $client = Join-Path $root "client"
 $server = Join-Path $root "server"
 $webProject = Join-Path $server "AdbClient.Web\AdbClient.Web.csproj"
+$devData = Join-Path $root "data\dev"
 
 if ([string]::IsNullOrWhiteSpace($InstallPath)) {
     $InstallPath = Join-Path $root "publish"
@@ -130,6 +131,7 @@ function Show-Info {
     Write-Host "Web UI:     http://127.0.0.1:6500"
     Write-Host "Angular:    http://127.0.0.1:4200"
     Write-Host "Docker:     http://127.0.0.1:6500"
+    Write-Host "Dev data:   $devData"
     Write-Host "Publish:    $InstallPath"
     Write-Host ""
     Write-Host "Prerequisites:"
@@ -200,7 +202,15 @@ function Start-Frontend {
 
 function Start-Backend {
     Assert-PortAvailable 6500 "the ASP.NET Core backend"
-    Invoke-ProjectCommand "Run backend on http://127.0.0.1:6500" $root @("dotnet", "run", "--project", $webProject)
+    Invoke-ProjectCommand "Run backend on http://127.0.0.1:6500 with isolated dev data" $root @(
+        "dotnet",
+        "run",
+        "--project",
+        $webProject,
+        "--",
+        "--DataPath",
+        $devData
+    )
 }
 
 function Publish-Local {

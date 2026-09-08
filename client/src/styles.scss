@@ -1,3 +1,13 @@
-@forward "../node_modules/bulma/bulma.scss";
-@forward "../node_modules/@fortawesome/fontawesome-free/css/all.css";
-@use "theme";
+@use 'sass:color';
+@use 'palette';
+@use '../node_modules/bulma/sass/utilities' with (
+  $scheme-h: color.channel(palette.$background, 'hue', $space: hsl),
+  $scheme-s: color.channel(palette.$background, 'saturation', $space: hsl),
+  $grey: color.mix(palette.$text, palette.$background, 65%),
+  $primary: palette.$primary,
+  $link: palette.$primary,
+  $info: palette.$primary
+);
+@use '../node_modules/bulma/sass';
+@forward '../node_modules/@fortawesome/fontawesome-free/css/all.css';
+@use 'theme';

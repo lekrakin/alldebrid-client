@@ -1,237 +1,83 @@
-// ─────────────────────────────────────────────────────────────────────
-// THEME CONFIG — edit these four colors, everything else derives.
-// ─────────────────────────────────────────────────────────────────────
-$bg:        #1a1a1a;  // page background
-$text:      #fffdf2;  // primary text
-$primary:   #fac333;  // accent: links, headings, primary buttons, table headers
-$secondary: #8a6a14;  // secondary accent: link buttons, header underline
-// ─────────────────────────────────────────────────────────────────────
+@use 'sass:color';
+@use 'palette';
 
-
-// Derived surface scale (lighter shades of $bg for panels/cards/hover)
-@use "sass:color";
-$bg-panel:    color.scale($bg, $lightness: 4%);
-$bg-card:     color.scale($bg, $lightness: 8%);
-$bg-elevated: color.scale($bg, $lightness: 12%);
-$bg-hover:    color.scale($bg, $lightness: 10%);
-$border:      color.scale($bg, $lightness: 18%);
-$text-muted:  color.mix($text, $bg, 65%);
-$primary-hover: color.scale($primary, $lightness: 12%);
-
-:root {
+// Let Bulma derive surfaces, borders and interaction states from the shared palette.
+:root[data-theme='dark'] {
   color-scheme: dark;
-
-  // Bulma surface scale
-  --bulma-scheme-main:     #{$bg};
-  --bulma-scheme-main-bis: #{$bg-panel};
-  --bulma-scheme-main-ter: #{$bg-card};
-  --bulma-scheme-invert:     #{$text};
-  --bulma-scheme-invert-bis: #{color.mix($text, $bg, 90%)};
-  --bulma-scheme-invert-ter: #{color.mix($text, $bg, 80%)};
-
-  --bulma-background:        #{$bg-card};
-  --bulma-background-hover:  #{$bg-hover};
-  --bulma-background-active: #{$bg-elevated};
-
-  // Inputs
-  --bulma-input-background-color:   #{$bg-panel};
-  --bulma-input-border-color:       #{$border};
-  --bulma-input-color:              #{$text};
-  --bulma-input-placeholder-color:  #{$text-muted};
-  --bulma-input-focus-border-color: #{$primary};
-  --bulma-input-shadow: none;
-
-  // Cards / boxes / modals
-  --bulma-card-background-color:        #{$bg-card};
-  --bulma-card-color:                   #{$text};
-  --bulma-card-header-background-color: #{$bg-elevated};
-  --bulma-box-background-color:         #{$bg-card};
-  --bulma-box-color:                    #{$text};
-  --bulma-modal-card-head-background-color: #{$bg-elevated};
-  --bulma-modal-card-body-background-color: #{$bg-card};
-  --bulma-modal-card-foot-background-color: #{$bg-elevated};
-  --bulma-modal-card-title-color:           #{$text};
-  --bulma-notification-background-color:    #{$bg-card};
-
-  // Tabs
-  --bulma-tabs-border-bottom-color:              #{$border};
-  --bulma-tabs-link-color:                       #{$text-muted};
-  --bulma-tabs-link-hover-color:                 #{$primary};
-  --bulma-tabs-link-active-color:                #{$primary};
-  --bulma-tabs-link-active-border-bottom-color:  #{$primary};
+  --bulma-scheme-main-l: #{color.channel(palette.$background, 'lightness', $space: hsl)};
+  --bulma-scheme-main-bis-l: calc(var(--bulma-scheme-main-l) + 2%);
+  --bulma-scheme-main-ter-l: calc(var(--bulma-scheme-main-l) + 4%);
+  --bulma-background-l: calc(var(--bulma-scheme-main-l) + 8%);
+  --bulma-text: #{palette.$text};
+  --bulma-text-strong: #{palette.$text};
 }
 
-html, body {
-  background-color: $bg !important;
-  color: $text;
+input[type='checkbox'],
+input[type='radio'] {
+  accent-color: var(--bulma-primary);
 }
 
-a {
-  color: $primary;
-  &:hover { color: $primary-hover; }
+.navbar {
+  --bulma-navbar-background-color: var(--bulma-scheme-main-bis);
+  border-bottom: 1px solid var(--bulma-border);
 }
 
-// ── Navbar (also overrides Bulma's .is-dark variant) ─────────────────
-.navbar,
-.navbar.is-dark {
-  background-color: $bg-panel !important;
-  border-bottom: 1px solid $border;
-
-  .navbar-item,
-  .navbar-link {
-    color: $text !important;
-
-    &:hover,
-    &.is-active {
-      background-color: $bg-card !important;
-      color: $primary !important;
-    }
-  }
-
-  .navbar-link::after { border-color: $primary; }
-
-  .navbar-dropdown {
-    background-color: $bg-panel !important;
-    border-top-color: $secondary;
-
-    .navbar-item {
-      color: $text !important;
-      &:hover {
-        background-color: $bg-card !important;
-        color: $primary !important;
-      }
-    }
-
-    .navbar-divider { background-color: $border; }
-  }
-
-  .navbar-burger {
-    color: $text;
-    &:hover { background-color: $bg-card; }
-    span { background-color: $text; }
-  }
-}
-
-// ── Torrent table ────────────────────────────────────────────────────
 .table {
-  background-color: $bg !important;
-  color: $text;
-
-  thead th {
-    background-color: $bg-elevated !important;
-    color: $text !important;
-    border-color: $border !important;
-    border-bottom-width: 2px;
-    cursor: pointer;
-  }
-
-  tbody tr {
-    background-color: $bg;
-    color: $text;
-
-    &:hover { background-color: $bg-hover !important; }
-
-    td {
-      border-color: $bg-elevated !important;
-      color: $text;
-    }
-  }
-
-  &.is-striped tbody tr:not(.is-selected):nth-child(even) {
-    background-color: $bg-panel;
-  }
+  --bulma-table-head-background-color: var(--bulma-scheme-main-ter);
 }
 
-// ── Green button palette (applied to ALL .button elements) ───────────
-$btn-top:       #70b126;
-$btn-bottom:    #508813;
-$btn-inset:     #a4e271;
-$btn-border:    #42661c;
-$btn-shadow:    #467513;
-$btn-hover-top: #7dc02a;
-$btn-active-bg: #467513;
-
-.button {
-  background: linear-gradient(to bottom, $btn-top 5%, $btn-bottom 100%) !important;
-  background-color: $btn-top !important;
-  border: 1px solid $btn-border !important;
-  border-radius: 6px !important;
-  box-shadow: inset 0 1px 0 0 $btn-inset !important;
-  color: #ffffff !important;
-  font-weight: bold;
-  text-shadow: 0 1px 0 $btn-shadow;
-  text-decoration: none;
-
-  &:hover:not([disabled]) {
-    background: linear-gradient(to bottom, $btn-hover-top 5%, $btn-top 100%) !important;
-    color: #ffffff !important;
-  }
-
-  &:active:not([disabled]) {
-    background: linear-gradient(to top, $btn-top 5%, $btn-bottom 100%) !important;
-    color: #ffffff !important;
-  }
-
-  // Static "MB" addon next to inputs — keep neutral, not green
-  &.is-static {
-    background: $bg-panel !important;
-    border-color: $border !important;
-    box-shadow: none !important;
-    color: $text-muted !important;
-    text-shadow: none;
-    font-weight: normal;
-  }
+.page-layout {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  min-width: 0;
 }
 
-// ── Tabs: active tab — text only, no background ──────────────────────
-.tabs li.is-active a {
-  background: transparent !important;
-  border: none !important;
-  border-bottom: 2px solid $primary !important;
-  border-radius: 0 !important;
-  box-shadow: none !important;
-  color: $primary !important;
-  font-weight: bold;
-  text-shadow: none;
+.page-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  flex-shrink: 0;
+  padding-block: 1rem max(1rem, env(safe-area-inset-bottom));
+  background: var(--bulma-scheme-main);
+  border-top: 1px solid var(--bulma-border);
 }
 
-// Headings + labels
-.label,
-h1, h2, h3, h4, h5, h6 {
-  color: $text !important;
+.buttons.page-actions {
+  margin-block: auto 0;
 }
 
-.label {
-  margin-bottom: 0;
+.page-actions .help {
+  flex: 1 1 16rem;
+  max-height: 6rem;
+  overflow: auto;
 }
 
-// Shared layout container
 .flex-container {
   display: flex;
   flex: 1 1 0;
-  gap: 20px;
-  flex-direction: row;
+  gap: 1.25rem;
 
   @media screen and (max-width: 1279px) {
     flex-direction: column;
   }
 }
 
-// "Advanced settings" divider
 .separator {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  color: $text-muted;
+  color: var(--bulma-text-weak);
   font-size: 0.8rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   margin: 1.25rem 0;
 
-  &::before, &::after {
+  &::before,
+  &::after {
     content: '';
     flex: 1;
     height: 1px;
-    background: $border;
+    background: var(--bulma-border);
   }
 }

@@ -1,4 +1,4 @@
-﻿using AdbClient.Data.Data;
+using AdbClient.Data.Data;
 using AdbClient.Data.Enums;
 using AdbClient.Data.Models.Internal;
 using Serilog.Core;
@@ -15,11 +15,13 @@ public class Settings(SettingData settingData)
     public async Task Update(IList<SettingProperty> settings)
     {
         await settingData.Update(settings);
+        ApplyRuntimeSettings();
     }
 
     public async Task Update(string settingId, Object? value)
     {
         await settingData.Update(settingId, value);
+        ApplyRuntimeSettings();
     }
 
     public async Task Seed()
@@ -31,6 +33,11 @@ public class Settings(SettingData settingData)
     {
         await settingData.ResetCache();
 
+        ApplyRuntimeSettings();
+    }
+
+    private static void ApplyRuntimeSettings()
+    {
         LoggingLevelSwitch.MinimumLevel = Settings.Get.General.LogLevel switch
         {
             LogLevel.Verbose => LogEventLevel.Verbose,

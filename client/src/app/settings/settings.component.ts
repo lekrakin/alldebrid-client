@@ -1,178 +1,297 @@
-import { Component, OnInit, inject } from '@angular/core';
-import { SettingsService } from 'src/app/settings.service';
-import { Setting } from '../models/setting.model';
-import { NgClass, KeyValuePipe } from '@angular/common';
+import { KeyValuePipe, NgClass } from '@angular/common';
+import { HttpErrorResponse } from '@angular/common/http';
+import { Component, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Nl2BrPipe } from '../nl2br.pipe';
-import { FileSizePipe } from '../filesize.pipe';
+import { finalize, switchMap, tap } from 'rxjs';
+import { SettingsService } from 'src/app/settings.service';
 import { AuthService } from '../auth.service';
+import { FileSizePipe } from '../filesize.pipe';
+import { Setting } from '../models/setting.model';
+import { Nl2BrPipe } from '../nl2br.pipe';
+import { MagnetHandlerComponent } from './magnet-handler/magnet-handler.component';
 
 @Component({
   selector: 'app-settings',
+  host: { class: 'page-layout' },
   templateUrl: './settings.component.html',
   styleUrls: ['./settings.component.scss'],
-  imports: [NgClass, FormsModule, KeyValuePipe, Nl2BrPipe, FileSizePipe],
+  imports: [NgClass, FormsModule, KeyValuePipe, Nl2BrPipe, FileSizePipe, MagnetHandlerComponent],
   standalone: true,
 })
 export class SettingsComponent implements OnInit {
   private settingsService = inject(SettingsService);
   private authService = inject(AuthService);
 
-  public activeTab = 0;
+  public readonly diagnosticsView = 'diagnostics';
+  public readonly accountView = 'account';
 
-  public profileUsername: string;
-  public profilePassword: string;
-  public profileSaving = false;
-  public profileSuccess = false;
-  public profileError: string = null;
+  public readonly activeView = signal('');
+  public readonly loading = signal(true);
+  public readonly loadError = signal<string | null>(null);
 
-  public tabs: Setting[] = [];
+  public readonly profileUsername = signal('');
+  public readonly profilePassword = signal('');
+  public readonly profileSaving = signal(false);
+  public readonly profileSuccess = signal(false);
+  public readonly profileError = signal<string | null>(null);
+
+  public readonly tabs = signal<Setting[]>([]);
   private settingMap = new Map<string, Setting>();
+  private visibleSecrets = new Set<string>();
 
-  public saving = false;
-  public error: string;
+  public readonly settingsSaving = signal(false);
+  public readonly settingsSaveSuccess = signal(false);
+  public readonly settingsSaveError = signal<string | null>(null);
 
-  public testPathError: string;
-  public testPathSuccess: boolean;
+  public readonly pathTesting = signal(false);
+  public readonly testPathError = signal<string | null>(null);
+  public readonly testPathSuccess = signal(false);
 
-  public testDownloadSpeedError: string;
-  public testDownloadSpeedSuccess: number;
+  public readonly downloadSpeedTesting = signal(false);
+  public readonly testDownloadSpeedError = signal<string | null>(null);
+  public readonly testDownloadSpeedSuccess = signal<number | null>(null);
 
-  public testWriteSpeedError: string;
-  public testWriteSpeedSuccess: number;
-
-  public canRegisterMagnetHandler = false;
+  public readonly writeSpeedTesting = signal(false);
+  public readonly testWriteSpeedError = signal<string | null>(null);
+  public readonly testWriteSpeedSuccess = signal<number | null>(null);
 
   ngOnInit(): void {
-    this.reset();
-    this.canRegisterMagnetHandler = !!(window.isSecureContext && 'registerProtocolHandler' in navigator);
+    this.loadSettings();
   }
 
-  public reset(): void {
-    this.settingsService.get().subscribe((settings) => {
-      this.tabs = settings.filter((m) => m.key.indexOf(':') === -1);
+  public loadSettings(): void {
+    this.loading.set(true);
+    this.loadError.set(null);
 
-      for (let tab of this.tabs) {
-        tab.settings = settings.filter((m) => m.key.indexOf(`${tab.key}:`) > -1);
-      }
+    this.settingsService
+      .get()
+      .pipe(finalize(() => this.loading.set(false)))
+      .subscribe({
+        next: (settings) => this.applySettings(settings),
+        error: (error) => {
+          this.loadError.set(this.getErrorMessage(error, 'Settings could not be loaded.'));
+        },
+      });
+  }
 
-      this.settingMap = new Map(settings.map((s) => [s.key, s]));
-    });
+  private applySettings(settings: Setting[]): void {
+    const tabs = settings.filter((setting) => setting.type === 'Object' && !setting.parentKey);
+
+    for (const tab of tabs) {
+      const prefix = `${tab.key}:`;
+      tab.settings = settings.filter(
+        (setting) => setting.parentKey === tab.key || setting.parentKey?.startsWith(prefix)
+      );
+    }
+
+    this.settingMap = new Map(settings.map((setting) => [setting.key, setting]));
+    this.visibleSecrets.clear();
+    this.tabs.set(tabs);
+
+    if (!this.activeView() || !this.isKnownView(this.activeView())) {
+      this.activeView.set(tabs[0]?.key ?? this.diagnosticsView);
+    }
+  }
+
+  private isKnownView(view: string): boolean {
+    return view === this.diagnosticsView || view === this.accountView || this.tabs().some((tab) => tab.key === view);
+  }
+
+  public selectView(view: string): void {
+    this.activeView.set(view);
+    this.settingsSaveError.set(null);
+    this.settingsSaveSuccess.set(false);
+  }
+
+  public saveSettings(): void {
+    if (this.settingsSaving()) {
+      return;
+    }
+
+    this.settingsSaving.set(true);
+    this.settingsSaveSuccess.set(false);
+    this.settingsSaveError.set(null);
+
+    const settingsToSave = this.tabs()
+      .flatMap((tab) => tab.settings)
+      .filter((setting) => setting.type !== 'Object');
+    let updateCompleted = false;
+
+    this.settingsService
+      .update(settingsToSave)
+      .pipe(
+        tap(() => (updateCompleted = true)),
+        switchMap(() => this.settingsService.get()),
+        finalize(() => this.settingsSaving.set(false))
+      )
+      .subscribe({
+        next: (settings) => {
+          this.applySettings(settings);
+          this.settingsSaveSuccess.set(true);
+        },
+        error: (error) => {
+          const fallback = updateCompleted
+            ? 'Settings were saved, but the current values could not be reloaded.'
+            : 'Settings could not be saved.';
+          this.settingsSaveError.set(this.getErrorMessage(error, fallback));
+        },
+      });
   }
 
   private getSetting(key: string): string {
     return (this.settingMap.get(key)?.value as string) || '';
   }
 
-  public ok(): void {
-    this.saving = true;
-
-    const settingsToSave = this.tabs.flatMap((m) => m.settings).filter((m) => m.type !== 'Object');
-
-    this.settingsService.update(settingsToSave).subscribe({
-      next: () => {
-        this.saving = false;
-      },
-      error: (err) => {
-        this.saving = false;
-        this.error = err;
-      },
-    });
-  }
-
   public testDownloadPath(): void {
-    const settingDownloadPath = this.getSetting('Paths:DownloadPath');
+    const downloadPath = this.getSetting('Paths:DownloadPath');
 
-    this.saving = true;
-    this.testPathError = null;
-    this.testPathSuccess = false;
+    this.pathTesting.set(true);
+    this.testPathError.set(null);
+    this.testPathSuccess.set(false);
 
-    this.settingsService.testPath(settingDownloadPath).subscribe({
-      next: () => {
-        this.saving = false;
-        this.testPathSuccess = true;
-      },
-      error: (err) => {
-        this.testPathError = err.error;
-        this.saving = false;
-      },
-    });
+    this.settingsService
+      .testPath(downloadPath)
+      .pipe(finalize(() => this.pathTesting.set(false)))
+      .subscribe({
+        next: () => {
+          this.testPathSuccess.set(true);
+        },
+        error: (error) => {
+          this.testPathError.set(this.getErrorMessage(error, 'The download path could not be tested.'));
+        },
+      });
   }
 
   public testDownloadSpeed(): void {
-    this.saving = true;
-    this.testDownloadSpeedError = null;
-    this.testDownloadSpeedSuccess = 0;
+    this.downloadSpeedTesting.set(true);
+    this.testDownloadSpeedError.set(null);
+    this.testDownloadSpeedSuccess.set(null);
 
-    this.settingsService.testDownloadSpeed().subscribe({
-      next: (result) => {
-        this.saving = false;
-        this.testDownloadSpeedSuccess = result;
-      },
-      error: (err) => {
-        this.testDownloadSpeedError = err.error;
-        this.saving = false;
-      },
-    });
+    this.settingsService
+      .testDownloadSpeed()
+      .pipe(finalize(() => this.downloadSpeedTesting.set(false)))
+      .subscribe({
+        next: (result) => {
+          this.testDownloadSpeedSuccess.set(result);
+        },
+        error: (error) => {
+          this.testDownloadSpeedError.set(this.getErrorMessage(error, 'The download speed test failed.'));
+        },
+      });
   }
-  public testWriteSpeed(): void {
-    this.saving = true;
-    this.testWriteSpeedError = null;
-    this.testWriteSpeedSuccess = 0;
 
-    this.settingsService.testWriteSpeed().subscribe({
-      next: (result) => {
-        this.saving = false;
-        this.testWriteSpeedSuccess = result;
-      },
-      error: (err) => {
-        this.testWriteSpeedError = err.error;
-        this.saving = false;
-      },
-    });
+  public testWriteSpeed(): void {
+    this.writeSpeedTesting.set(true);
+    this.testWriteSpeedError.set(null);
+    this.testWriteSpeedSuccess.set(null);
+
+    this.settingsService
+      .testWriteSpeed()
+      .pipe(finalize(() => this.writeSpeedTesting.set(false)))
+      .subscribe({
+        next: (result) => {
+          this.testWriteSpeedSuccess.set(result);
+        },
+        error: (error) => {
+          this.testWriteSpeedError.set(this.getErrorMessage(error, 'The write speed test failed.'));
+        },
+      });
   }
 
   public getPlaceholder(setting: Setting): string {
     switch (setting.key) {
       case 'Paths:MappedPath':
-        return this.getSetting('Paths:DownloadPath') || 'same as download path';
+        return this.getSetting('Paths:DownloadPath') || 'Same as the local download path';
       case 'Paths:WatchErrorPath':
       case 'Paths:WatchProcessedPath': {
-        const wp = this.getSetting('Paths:WatchPath');
-        const sub = setting.key === 'Paths:WatchErrorPath' ? 'error' : 'processed';
-        return wp ? `${wp}\\${sub}` : '';
+        const inboxPath = this.getSetting('Paths:WatchPath');
+        const subfolder = setting.key === 'Paths:WatchErrorPath' ? 'error' : 'processed';
+
+        if (!inboxPath) {
+          return `Inside the inbox (${subfolder})`;
+        }
+
+        const separator = inboxPath.includes('\\') && !inboxPath.includes('/') ? '\\' : '/';
+        return `${inboxPath.replace(/[\\/]+$/, '')}${separator}${subfolder}`;
       }
       default:
         return '';
     }
   }
 
-  public saveProfile(): void {
-    this.profileSuccess = false;
-    this.profileError = null;
-    this.profileSaving = true;
-
-    this.authService.update(this.profileUsername, this.profilePassword).subscribe({
-      next: () => {
-        this.profileSuccess = true;
-        this.profileSaving = false;
-      },
-      error: (err) => {
-        this.profileError = err.error;
-        this.profileSuccess = false;
-        this.profileSaving = false;
-      },
-    });
+  public isSecretVisible(setting: Setting): boolean {
+    return this.visibleSecrets.has(setting.key);
   }
 
-  public registerMagnetHandler(): void {
-    try {
-      navigator.registerProtocolHandler('magnet', `${window.location.origin}/add?magnet=%s`);
-      alert(
-        'Success! Your browser will now prompt you to confirm and add the client as the default handler for magnet links.'
-      );
-    } catch (error) {
-      alert('Magnet link registration failed.');
+  public toggleSecretVisibility(setting: Setting): void {
+    if (this.visibleSecrets.has(setting.key)) {
+      this.visibleSecrets.delete(setting.key);
+      return;
     }
+
+    this.visibleSecrets.add(setting.key);
+  }
+
+  public saveProfile(): void {
+    if (this.profileSaving() || (!this.profileUsername() && !this.profilePassword())) {
+      return;
+    }
+
+    this.profileSuccess.set(false);
+    this.profileError.set(null);
+    this.profileSaving.set(true);
+
+    this.authService
+      .update(this.profileUsername(), this.profilePassword())
+      .pipe(finalize(() => this.profileSaving.set(false)))
+      .subscribe({
+        next: () => {
+          this.profileUsername.set('');
+          this.profilePassword.set('');
+          this.profileSuccess.set(true);
+        },
+        error: (error) => {
+          this.profileError.set(this.getErrorMessage(error, 'Account credentials could not be updated.'));
+          this.profileSuccess.set(false);
+        },
+      });
+  }
+
+  private getErrorMessage(error: unknown, fallback: string): string {
+    const payload = error instanceof HttpErrorResponse ? error.error : error;
+
+    if (typeof payload === 'string' && payload.trim()) {
+      return payload.trim();
+    }
+
+    if (payload && typeof payload === 'object') {
+      const response = payload as Record<string, unknown>;
+
+      for (const key of ['detail', 'title', 'message']) {
+        const value = response[key];
+
+        if (typeof value === 'string' && value.trim()) {
+          return value.trim();
+        }
+      }
+
+      const validationErrors = response['errors'];
+
+      if (validationErrors && typeof validationErrors === 'object') {
+        const messages = Object.values(validationErrors as Record<string, unknown>).flatMap((value) =>
+          Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+        );
+
+        if (messages.length > 0) {
+          return messages.join(' ');
+        }
+      }
+    }
+
+    if (error instanceof Error && error.message) {
+      return error.message;
+    }
+
+    return fallback;
   }
 }

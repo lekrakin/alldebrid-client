@@ -87,11 +87,13 @@ Keep each commit independently understandable and limited to one concern. Explai
 
 Versions follow Semantic Versioning:
 
+Batch verified changes into releases; individual commits are not release checkpoints. Routine fixes and polish belong in patch releases. Reserve minor versions for new capabilities and major versions for breaking changes.
+
 - `fix:` increments the patch version.
 - `feat:` increments the minor version.
 - A `!` or `BREAKING CHANGE:` footer increments the major version.
 - Documentation, tests, refactors, build changes, CI changes, and chores do not create a release unless they include a breaking change.
 
-Release Please maintains a release pull request from commits merged since the latest release. That pull request updates `CHANGELOG.md`, `version.txt`, the .NET assembly version, frontend package metadata, and Docker defaults together. Merging it creates the Git tag and GitHub release. The verified release workflow then uploads the package, checksum, and multi-platform Docker image.
+Release Please maintains a release pull request from commits merged since the latest release. That pull request updates `CHANGELOG.md`, `version.txt`, the .NET assembly version, frontend package metadata, and Docker defaults together. Merging it creates the Git tag and GitHub release. Post-release jobs then build the Windows package and multi-platform container image; successful jobs upload the package, checksum, and image.
 
-Do not manually edit managed version fields or create release tags.
+Normally, let Release Please update managed version fields; do not create release tags manually. For an explicitly approved local versioned deployment before publication, update the source version fields together and record the intended version with a `Release-As: x.y.z` commit trailer. Keep `.release-please-manifest.json` at the last published version and changelog entries under **Unreleased** until the release pull request is prepared. Local deployment does not publish a release.

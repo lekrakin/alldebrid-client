@@ -16,11 +16,11 @@ public class InternalDownloaderTest
     [Fact]
     public void Configuration_IsBoundedAndMapsDownloadSettings()
     {
-        var settings = new DbSettingsDownloadClient
+        var settings = new DbSettingsDownloads
         {
-            MaxSpeed = 96,
-            ParallelCount = 4,
-            ParallelChunkCount = 12
+            SpeedLimit = 96,
+            ConnectionsPerFile = 4,
+            ChunksPerFile = 12
         };
 
         var configuration = InternalDownloader.CreateDownloadConfiguration(settings, 3);
@@ -38,20 +38,20 @@ public class InternalDownloaderTest
         Assert.False(configuration.CheckDiskSizeBeforeDownload);
         Assert.Equal(HttpVersion.Version11, configuration.RequestConfiguration.ProtocolVersion);
         Assert.Equal("alldebrid-client", configuration.RequestConfiguration.UserAgent);
-        Assert.Null(typeof(DbSettingsDownloadClient).GetProperty("ChunkCount"));
-        Assert.Null(typeof(DbSettingsDownloadClient).GetProperty("BufferSize"));
-        Assert.Null(typeof(DbSettingsDownloadClient).GetProperty("LogLevel"));
-        Assert.Null(typeof(DbSettingsDownloadClient).Assembly.GetType("AdbClient.Data.Enums.DownloadClientLogLevel"));
+        Assert.Null(typeof(DbSettingsDownloads).GetProperty("ChunkCount"));
+        Assert.Null(typeof(DbSettingsDownloads).GetProperty("BufferSize"));
+        Assert.Null(typeof(DbSettingsDownloads).GetProperty("LogLevel"));
+        Assert.Null(typeof(DbSettingsDownloads).Assembly.GetType("AdbClient.Data.Enums.DownloadClientLogLevel"));
     }
 
     [Fact]
     public void Configuration_UsesSafeFallbacksAndCanBeUpdated()
     {
-        var settings = new DbSettingsDownloadClient
+        var settings = new DbSettingsDownloads
         {
-            MaxSpeed = 0,
-            ParallelCount = 0,
-            ParallelChunkCount = 0
+            SpeedLimit = 0,
+            ConnectionsPerFile = 0,
+            ChunksPerFile = 0
         };
 
         var configuration = InternalDownloader.CreateDownloadConfiguration(settings, 0);
@@ -72,15 +72,15 @@ public class InternalDownloaderTest
 
         Assert.Equal(80L * 1024 * 1024, configuration.MaximumBytesPerSecond);
 
-        settings.ParallelCount = int.MaxValue;
-        settings.ParallelChunkCount = int.MaxValue;
+        settings.ConnectionsPerFile = int.MaxValue;
+        settings.ChunksPerFile = int.MaxValue;
         configuration = InternalDownloader.CreateDownloadConfiguration(settings, 1);
 
         Assert.Equal(InternalDownloader.MaximumParallelConnections, configuration.ParallelCount);
         Assert.Equal(InternalDownloader.MaximumChunkCount, configuration.ChunkCount);
 
-        settings.ParallelCount = 16;
-        settings.ParallelChunkCount = 4;
+        settings.ConnectionsPerFile = 16;
+        settings.ChunksPerFile = 4;
         configuration = InternalDownloader.CreateDownloadConfiguration(settings, 1);
 
         Assert.Equal(4, configuration.ParallelCount);
@@ -102,9 +102,9 @@ public class InternalDownloaderTest
             var configuration = InternalDownloader.CreateDownloadConfiguration(
                 new()
                 {
-                    MaxSpeed = 0,
-                    ParallelCount = 3,
-                    ParallelChunkCount = 4
+                    SpeedLimit = 0,
+                    ConnectionsPerFile = 3,
+                    ChunksPerFile = 4
                 },
                 1);
             var downloader = new InternalDownloader(server.Url, filePath, configuration);
@@ -156,8 +156,8 @@ public class InternalDownloaderTest
             var configuration = InternalDownloader.CreateDownloadConfiguration(
                 new()
                 {
-                    ParallelCount = 1,
-                    ParallelChunkCount = 1
+                    ConnectionsPerFile = 1,
+                    ChunksPerFile = 1
                 },
                 1);
             var downloader = new InternalDownloader(server.Url, filePath, configuration);
@@ -207,8 +207,8 @@ public class InternalDownloaderTest
                 var configuration = InternalDownloader.CreateDownloadConfiguration(
                     new()
                     {
-                        ParallelCount = 1,
-                        ParallelChunkCount = 1
+                        ConnectionsPerFile = 1,
+                        ChunksPerFile = 1
                     },
                     1);
                 var downloader = new InternalDownloader(server.Url, filePath, configuration);
@@ -254,8 +254,8 @@ public class InternalDownloaderTest
             var configuration = InternalDownloader.CreateDownloadConfiguration(
                 new()
                 {
-                    ParallelCount = 1,
-                    ParallelChunkCount = 1
+                    ConnectionsPerFile = 1,
+                    ChunksPerFile = 1
                 },
                 1);
             var downloader = new InternalDownloader(server.Url, filePath, configuration);
@@ -320,8 +320,8 @@ public class InternalDownloaderTest
             var configuration = InternalDownloader.CreateDownloadConfiguration(
                 new()
                 {
-                    ParallelCount = 1,
-                    ParallelChunkCount = 1
+                    ConnectionsPerFile = 1,
+                    ChunksPerFile = 1
                 },
                 1);
             configuration.MaxTryAgainOnFailure = 0;

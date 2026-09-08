@@ -1,3 +1,5 @@
+@let torrent = torrentState();
+
 <div class="tabs">
   <ul>
     <li [ngClass]="{ 'is-active': activeTab === 0 }" (click)="activeTab = 0">
@@ -23,17 +25,6 @@
     @if (activeTab === 0) {
       <div class="flex-container">
         <div style="flex: 1 1 0">
-          <div class="field is-grouped">
-            <div class="control">
-              <button class="button is-danger" (click)="showDeleteModal()">Delete Torrent</button>
-            </div>
-            <div class="control">
-              <button class="button is-primary" (click)="showRetryModal()">Retry Torrent</button>
-            </div>
-            <div class="control">
-              <button class="button is-light" (click)="showUpdateSettingsModal()">Change Settings</button>
-            </div>
-          </div>
           <div class="field">
             <label class="label">Status</label>
             {{ torrent | status }}
@@ -73,20 +64,6 @@
               }
               @case (1) {
                 Don't download files to host
-              }
-            }
-          </div>
-          <div class="field">
-            <label class="label">Post Torrent Download Action</label>
-            @switch (torrent.downloadAction) {
-              @case (0) {
-                Download all files above a certain size
-              }
-              @case (1) {
-                Download all available files on AllDebrid above a certain size
-              }
-              @case (2) {
-                Pick files I want to download
               }
             }
           </div>
@@ -223,10 +200,6 @@
           <div class="field">
             <label class="label">AllDebrid speed</label>
             {{ torrent.rdSpeed || 0 }}
-          </div>
-          <div class="field">
-            <label class="label">AllDebrid seeders</label>
-            {{ torrent.rdSeeders || '0' }}
           </div>
         </div>
       </div>
@@ -431,9 +404,14 @@
       </div>
     }
   </div>
+  <div class="buttons page-actions" role="group" aria-label="Torrent actions">
+    <button class="button is-danger" (click)="showDeleteModal()">Delete Torrent</button>
+    <button class="button" (click)="showRetryModal()">Retry Torrent</button>
+    <button class="button" (click)="showUpdateSettingsModal()">Change Settings</button>
+  </div>
 }
 
-<div class="modal" [class.is-active]="isDeleteModalActive">
+<div class="modal" [class.is-active]="isDeleteModalActive()">
   <div class="modal-background"></div>
   <div class="modal-card">
     <header class="modal-card-head">
@@ -465,32 +443,35 @@
             <input type="checkbox" [(ngModel)]="deleteSelectAll" (change)="toggleDeleteSelectAllOptions()" />
             Select All
           </label>
+          @if (!hasDeleteAction()) {
+            <p class="help">Select at least one delete action.</p>
+          }
         </div>
       </div>
       <div class="notification is-primary">
         Deleting a torrent from AllDebrid will automatically delete it here too.
       </div>
-      @if (deleteError?.length > 0) {
+      @if (deleteError(); as deleteError) {
         <div class="notification is-danger is-light">Error deleting torrent: {{ deleteError }}</div>
       }
     </section>
     <footer class="modal-card-foot">
       <button
-        class="button is-success"
+        class="button is-danger"
         (click)="deleteOk()"
-        [disabled]="deleting"
-        [ngClass]="{ 'is-loading': deleting }"
+        [disabled]="deleting() || !hasDeleteAction()"
+        [ngClass]="{ 'is-loading': deleting() }"
       >
         Delete
       </button>
-      <button class="button" (click)="deleteCancel()" [disabled]="deleting" [ngClass]="{ 'is-loading': deleting }">
+      <button class="button" (click)="deleteCancel()" [disabled]="deleting()" [ngClass]="{ 'is-loading': deleting() }">
         Cancel
       </button>
     </footer>
   </div>
 </div>
 
-<div class="modal" [class.is-active]="isRetryModalActive">
+<div class="modal" [class.is-active]="isRetryModalActive()">
   <div class="modal-background"></div>
   <div class="modal-card">
     <header class="modal-card-head">
@@ -503,27 +484,27 @@
         This action will delete all the torrent data + all local downloads. Then it will re-add the original magnet link
         or torrent file to AllDebrid.
       </p>
-      @if (retryError?.length > 0) {
+      @if (retryError(); as retryError) {
         <div class="notification is-danger is-light">Error retrying torrent: {{ retryError }}</div>
       }
     </section>
     <footer class="modal-card-foot">
       <button
-        class="button is-success"
+        class="button is-warning"
         (click)="retryOk()"
-        [disabled]="retrying"
-        [ngClass]="{ 'is-loading': retrying }"
+        [disabled]="retrying()"
+        [ngClass]="{ 'is-loading': retrying() }"
       >
         Retry
       </button>
-      <button class="button" (click)="retryCancel()" [disabled]="retrying" [ngClass]="{ 'is-loading': retrying }">
+      <button class="button" (click)="retryCancel()" [disabled]="retrying()" [ngClass]="{ 'is-loading': retrying() }">
         Cancel
       </button>
     </footer>
   </div>
 </div>
 
-<div class="modal" [class.is-active]="isDownloadRetryModalActive">
+<div class="modal" [class.is-active]="isDownloadRetryModalActive()">
   <div class="modal-background"></div>
   <div class="modal-card">
     <header class="modal-card-head">
@@ -533,24 +514,24 @@
     <section class="modal-card-body">
       <p>Are you sure you want to retry this download?</p>
       <p>This action will remove the local download and re-download the file from AllDebrid.</p>
-      @if (downloadRetryError?.length > 0) {
+      @if (downloadRetryError(); as downloadRetryError) {
         <div class="notification is-danger is-light">Error retrying download: {{ downloadRetryError }}</div>
       }
     </section>
     <footer class="modal-card-foot">
       <button
-        class="button is-success"
+        class="button is-primary"
         (click)="downloadRetryOk()"
-        [disabled]="downloadRetrying"
-        [ngClass]="{ 'is-loading': downloadRetrying }"
+        [disabled]="downloadRetrying()"
+        [ngClass]="{ 'is-loading': downloadRetrying() }"
       >
         Retry
       </button>
       <button
         class="button"
         (click)="downloadRetryCancel()"
-        [disabled]="downloadRetrying"
-        [ngClass]="{ 'is-loading': downloadRetrying }"
+        [disabled]="downloadRetrying()"
+        [ngClass]="{ 'is-loading': downloadRetrying() }"
       >
         Cancel
       </button>
@@ -558,12 +539,12 @@
   </div>
 </div>
 
-<div class="modal" [class.is-active]="isUpdateSettingsModalActive">
+<div class="modal" [class.is-active]="isUpdateSettingsModalActive()">
   <div class="modal-background"></div>
   <div class="modal-card">
     <header class="modal-card-head">
       <p class="modal-card-title">Update torrent settings</p>
-      <button class="delete" aria-label="close" (click)="updateSettingsCancel()"></button>
+      <button class="delete" aria-label="close" (click)="updateSettingsCancel()" [disabled]="updating()"></button>
     </header>
     <section class="modal-card-body">
       <p>
@@ -573,7 +554,7 @@
       <div class="field">
         <label class="label">Downloader</label>
         <div class="control select is-fullwidth">
-          <select [(ngModel)]="updateSettingsDownloadClient">
+          <select [(ngModel)]="updateSettingsDownloadClient" [disabled]="updating()">
             <option [ngValue]="0">Internal Downloader</option>
           </select>
         </div>
@@ -584,7 +565,7 @@
       <div class="field">
         <label class="label">Post Download Action</label>
         <div class="control select is-fullwidth">
-          <select [(ngModel)]="updateSettingsHostDownloadAction">
+          <select [(ngModel)]="updateSettingsHostDownloadAction" [disabled]="updating()">
             <option [ngValue]="null"></option>
             <option [ngValue]="0">Download all files to host</option>
             <option [ngValue]="1">Don't download any files to host</option>
@@ -598,14 +579,14 @@
       <div class="field">
         <label class="label">Category</label>
         <div class="control">
-          <input class="input" type="text" [(ngModel)]="updateSettingsCategory" />
+          <input class="input" type="text" [(ngModel)]="updateSettingsCategory" [disabled]="updating()" />
         </div>
         <p class="help">The category becomes a sub-folder in your main download path.</p>
       </div>
       <div class="field">
         <label class="label">Priority</label>
         <div class="control">
-          <input class="input" type="number" step="1" [(ngModel)]="updateSettingsPriority" />
+          <input class="input" type="number" step="1" [(ngModel)]="updateSettingsPriority" [disabled]="updating()" />
         </div>
         <p class="help">
           Set the priority for this torrent where 1 is the highest. When empty it will be assigned the lowest priority.
@@ -621,6 +602,7 @@
             min="0"
             step="1"
             [(ngModel)]="updateSettingsDownloadRetryAttempts"
+            [disabled]="updating()"
           />
         </div>
         <p class="help">When a single download fails it will retry it this many times before marking it as failed.</p>
@@ -635,6 +617,7 @@
             min="0"
             step="1"
             [(ngModel)]="updateSettingsTorrentRetryAttempts"
+            [disabled]="updating()"
           />
         </div>
         <p class="help">
@@ -645,7 +628,15 @@
       <div class="field">
         <label class="label">Delete download when in error</label>
         <div class="control">
-          <input class="input" type="number" max="1000" min="0" step="1" [(ngModel)]="updateSettingsDeleteOnError" />
+          <input
+            class="input"
+            type="number"
+            max="1000"
+            min="0"
+            step="1"
+            [(ngModel)]="updateSettingsDeleteOnError"
+            [disabled]="updating()"
+          />
         </div>
         <p class="help">
           When a download has been in error for this many minutes, delete it from the provider and the client. 0 to
@@ -662,6 +653,7 @@
             min="0"
             step="1"
             [(ngModel)]="updateSettingsTorrentLifetime"
+            [disabled]="updating()"
           />
         </div>
         <p class="help">
@@ -670,23 +662,26 @@
         </p>
       </div>
     </section>
-    <footer class="modal-card-foot">
+    <footer class="modal-card-foot is-flex-wrap-wrap">
       <button
-        class="button is-success"
+        class="button is-primary"
         (click)="updateSettingsOk()"
-        [disabled]="updating"
-        [ngClass]="{ 'is-loading': updating }"
+        [disabled]="updating()"
+        [ngClass]="{ 'is-loading': updating() }"
       >
         Save
       </button>
       <button
         class="button"
         (click)="updateSettingsCancel()"
-        [disabled]="updating"
-        [ngClass]="{ 'is-loading': updating }"
+        [disabled]="updating()"
+        [ngClass]="{ 'is-loading': updating() }"
       >
         Cancel
       </button>
+      @if (updateSettingsError(); as updateSettingsError) {
+        <p class="help is-danger" role="alert">{{ updateSettingsError }}</p>
+      }
     </footer>
   </div>
 </div>

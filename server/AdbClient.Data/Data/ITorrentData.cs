@@ -1,4 +1,4 @@
-﻿using AdbClient.Data.Enums;
+using AdbClient.Data.Enums;
 using AdbClient.Data.Models.Data;
 
 namespace AdbClient.Data.Data;
@@ -25,5 +25,15 @@ public interface ITorrentData
     Task UpdatePriority(Guid torrentId, int? priority);
     Task UpdateRetry(Guid torrentId, DateTimeOffset? dateTime, int retryCount);
     Task UpdateError(Guid torrentId, string error);
+    Task FinalizeRetainedDeletion(
+        Guid torrentId,
+        bool hideFromQbittorrent,
+        bool providerDeleted,
+        bool markAsDeleted);
+    Task<Torrent?> ReactivateFromQbittorrent(
+        Guid torrentId,
+        Torrent requestedDefaults,
+        IReadOnlySet<Guid>? downloadsToReset,
+        bool providerDeleted);
     Task Delete(Guid torrentId);
 }

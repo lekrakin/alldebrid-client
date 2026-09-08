@@ -75,7 +75,7 @@ public static class DownloadHelper
 
     public static string? GetDownloadPath(Torrent torrent, Download download)
     {
-        if (string.IsNullOrWhiteSpace(download.Link) || torrent.RdName == null)
+        if (torrent.RdName == null)
         {
             return null;
         }
@@ -109,15 +109,15 @@ public static class DownloadHelper
 
     public static string? GetFileName(Download download)
     {
-        if (string.IsNullOrWhiteSpace(download.Link))
-        {
-            return null;
-        }
-
         var fileName = download.FileName;
 
         if (string.IsNullOrWhiteSpace(fileName))
         {
+            if (string.IsNullOrWhiteSpace(download.Link))
+            {
+                return null;
+            }
+
             fileName = HttpUtility.UrlDecode(new Uri(download.Link).Segments.Last());
         }
 

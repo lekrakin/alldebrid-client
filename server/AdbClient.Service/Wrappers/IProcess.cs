@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 
 namespace AdbClient.Service.Wrappers;
 
@@ -11,6 +11,7 @@ public interface IProcess : IDisposable
 
     void BeginOutputReadLine();
     void BeginErrorReadLine();
+    void Kill(bool entireProcessTree);
     bool WaitForExit(int milliseconds);
     void Start();
 }

@@ -1,0 +1,44 @@
+<section aria-labelledby="magnet-handler-heading">
+  <h3 class="label mb-2" id="magnet-handler-heading">Magnet links</h3>
+
+  @switch (availability) {
+    @case ('available') {
+      <button class="button" type="button" (click)="register()">Use AllDebrid Client for magnet links</button>
+      <p class="help">Ask this browser to open magnet links here. This does not change your download settings.</p>
+    }
+    @case ('insecure') {
+      <p class="help">Your browser cannot register a handler from this connection.</p>
+      <p class="help">
+        @if (localSettingsUrl) {
+          On the computer running AllDebrid Client, <a [href]="localSettingsUrl">open these settings on localhost</a>.
+          From another computer, use HTTPS.
+        } @else {
+          Open AllDebrid Client directly over HTTPS to register a handler.
+        }
+        You can still paste magnets into Add New Torrent.
+      </p>
+    }
+    @case ('unsupported') {
+      <p class="help">
+        This browser does not support magnet-link registration. Use a browser that supports protocol handlers, or paste
+        magnets into Add New Torrent.
+      </p>
+    }
+  }
+
+  <p class="help">
+    Already registered? Check <strong>Protocol handlers</strong> in your browser's settings. This app cannot read that
+    setting or tell whether you accepted a request.
+  </p>
+
+  @if (request(); as result) {
+    @if (result.status === 'requested') {
+      <div class="notification mt-3" role="status">
+        Registration requested. Accept your browser's prompt if it appears. If nothing happens, check its
+        protocol-handler settings for an existing or blocked registration.
+      </div>
+    } @else {
+      <div class="notification is-danger is-light mt-3" role="alert">{{ result.message }}</div>
+    }
+  }
+</section>

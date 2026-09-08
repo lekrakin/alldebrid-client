@@ -1,9 +1,9 @@
-﻿using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using AdbClient.Data.Enums;
 using AdbClient.Data.Models.Data;
 using AdbClient.Service.Services;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using LogLevel = Microsoft.Extensions.Logging.LogLevel;
 
 namespace AdbClient.Service.BackgroundServices;
@@ -21,7 +21,7 @@ public class WatchFolderChecker(ILogger<WatchFolderChecker> logger, IServiceProv
 
         using var scope = serviceProvider.CreateScope();
         var torrentService = scope.ServiceProvider.GetRequiredService<Torrents>();
-            
+
         logger.LogInformation("WatchFolderChecker started.");
 
         while (!stoppingToken.IsCancellationRequested)
@@ -30,25 +30,25 @@ public class WatchFolderChecker(ILogger<WatchFolderChecker> logger, IServiceProv
             {
                 await Task.Delay(1000, stoppingToken);
 
-                if (string.IsNullOrWhiteSpace(Settings.Get.Paths.WatchPath))
+                if (string.IsNullOrWhiteSpace(Settings.Get.WatchFolder.InboxPath))
                 {
                     continue;
                 }
 
-                var processedStorePath = Path.Combine(Settings.Get.Paths.WatchPath, "processed");
-                var errorStorePath = Path.Combine(Settings.Get.Paths.WatchPath, "error");
+                var processedStorePath = Path.Combine(Settings.Get.WatchFolder.InboxPath, "processed");
+                var errorStorePath = Path.Combine(Settings.Get.WatchFolder.InboxPath, "error");
 
-                if (!string.IsNullOrWhiteSpace(Settings.Get.Paths.WatchProcessedPath))
+                if (!string.IsNullOrWhiteSpace(Settings.Get.WatchFolder.ProcessedPath))
                 {
-                    processedStorePath = Settings.Get.Paths.WatchProcessedPath;
+                    processedStorePath = Settings.Get.WatchFolder.ProcessedPath;
                 }
 
-                if (!string.IsNullOrWhiteSpace(Settings.Get.Paths.WatchErrorPath))
+                if (!string.IsNullOrWhiteSpace(Settings.Get.WatchFolder.ErrorPath))
                 {
-                    errorStorePath = Settings.Get.Paths.WatchErrorPath;
+                    errorStorePath = Settings.Get.WatchFolder.ErrorPath;
                 }
 
-                var nextCheck = _prevCheck.AddSeconds(Settings.Get.Watch.Interval);
+                var nextCheck = _prevCheck.AddSeconds(Settings.Get.WatchFolder.Interval);
 
                 if (DateTime.UtcNow < nextCheck)
                 {
@@ -57,7 +57,7 @@ public class WatchFolderChecker(ILogger<WatchFolderChecker> logger, IServiceProv
 
                 _prevCheck = DateTime.UtcNow;
 
-                var torrentFiles = Directory.GetFiles(Settings.Get.Paths.WatchPath, "*.*", SearchOption.TopDirectoryOnly);
+                var torrentFiles = Directory.GetFiles(Settings.Get.WatchFolder.InboxPath, "*.*", SearchOption.TopDirectoryOnly);
 
                 foreach (var torrentFile in torrentFiles)
                 {
@@ -80,21 +80,18 @@ public class WatchFolderChecker(ILogger<WatchFolderChecker> logger, IServiceProv
                         var torrent = new Torrent
                         {
                             DownloadClient = Data.Enums.DownloadClient.Internal,
-                            Category = Settings.Get.DownloadClient.Default.Category,
-                            HostDownloadAction = Settings.Get.DownloadClient.Default.HostDownloadAction,
-                            FinishedActionDelay = Settings.Get.DownloadClient.Default.FinishedActionDelay,
-                            DownloadAction = Settings.Get.DownloadClient.Default.OnlyDownloadAvailableFiles
-                                ? TorrentDownloadAction.DownloadAvailableFiles
-                                : TorrentDownloadAction.DownloadAll,
-                            FinishedAction = Settings.Get.DownloadClient.Default.FinishedAction,
-                            DownloadMinSize = Settings.Get.DownloadClient.Default.MinFileSize,
-                            IncludeRegex = Settings.Get.DownloadClient.Default.IncludeRegex,
-                            ExcludeRegex = Settings.Get.DownloadClient.Default.ExcludeRegex,
-                            TorrentRetryAttempts = Settings.Get.DownloadClient.Default.TorrentRetryAttempts,
-                            DownloadRetryAttempts = Settings.Get.DownloadClient.Default.DownloadRetryAttempts,
-                            DeleteOnError = Settings.Get.DownloadClient.Default.DeleteOnError,
-                            Lifetime = Settings.Get.DownloadClient.Default.TorrentLifetime,
-                            Priority = Settings.Get.DownloadClient.Default.Priority > 0 ? Settings.Get.DownloadClient.Default.Priority : null
+                            Category = Settings.Get.Downloads.Defaults.Category,
+                            HostDownloadAction = Settings.Get.Downloads.Defaults.HostDownloadAction,
+                            FinishedActionDelay = Settings.Get.Downloads.Defaults.FinishedActionDelay,
+                            FinishedAction = Settings.Get.Downloads.Defaults.FinishedAction,
+                            DownloadMinSize = Settings.Get.Downloads.Defaults.MinFileSize,
+                            IncludeRegex = Settings.Get.Downloads.Defaults.IncludeRegex,
+                            ExcludeRegex = Settings.Get.Downloads.Defaults.ExcludeRegex,
+                            TorrentRetryAttempts = Settings.Get.Downloads.Defaults.TorrentRetryAttempts,
+                            DownloadRetryAttempts = Settings.Get.Downloads.Defaults.DownloadRetryAttempts,
+                            DeleteOnError = Settings.Get.Downloads.Defaults.DeleteOnError,
+                            Lifetime = Settings.Get.Downloads.Defaults.TorrentLifetime,
+                            Priority = Settings.Get.Downloads.Defaults.Priority > 0 ? Settings.Get.Downloads.Defaults.Priority : null
                         };
 
                         if (fileInfo.Extension == ".torrent")
@@ -112,7 +109,7 @@ public class WatchFolderChecker(ILogger<WatchFolderChecker> logger, IServiceProv
                         {
                             Directory.CreateDirectory(processedStorePath);
                         }
-                        
+
                         var processedPath = Path.Combine(processedStorePath, fileInfo.Name);
 
                         if (File.Exists(processedPath))

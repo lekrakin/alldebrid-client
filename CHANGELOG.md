@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Fixed
+
+- Preserve existing databases when upgrading custom relative startup paths; reject ambiguous paths before replacing application files.
+- Preserve the cursor and selection when pasting into the magnet field.
+- Keep torrent-settings drafts and show retry feedback when saving fails, without displaying unsaved values.
+- Use a shared orange-accent dark theme and standard buttons while preserving premium status colors.
+- Sort torrent counts correctly without mutating live data, and restrict bulk selection to matching rows.
+- Add resizable, single-line torrent columns, a wider list layout, and compact dates with full timestamp tooltips.
+- Pin settings, add-torrent, and torrent-management actions to the bottom of the window on short and long pages, including save feedback.
+- Show external-client removal separately from download status without changing categories or assuming an import succeeded.
+- Remove seeder tracking and seeder-based stalled states; use AllDebrid's reported download state instead.
+- Preserve encoded trackers and literal percent signs when opening magnet links.
+- Explain browser magnet-handler permissions without claiming a request is an active registration.
+- Reuse the source deployment script for UAC elevation, with a read-only dry run and output in the original terminal.
+
 ## [1.6.0](https://github.com/krakn-dev/alldebrid-client/compare/v1.5.2...v1.6.0) (2026-09-04)
 
 

@@ -1,13 +1,15 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, DestroyRef, OnInit, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router, ActivatedRoute } from '@angular/router';
 import { TorrentService } from 'src/app/torrent.service';
-import { Torrent, TorrentFileAvailability } from '../models/torrent.model';
+import { Torrent } from '../models/torrent.model';
 import { SettingsService } from '../settings.service';
 import { FormsModule } from '@angular/forms';
 import { NgClass } from '@angular/common';
 
 @Component({
   selector: 'app-add-new-torrent',
+  host: { class: 'page-layout' },
   templateUrl: './add-new-torrent.component.html',
   styleUrls: ['./add-new-torrent.component.scss'],
   imports: [FormsModule, NgClass],
@@ -18,208 +20,124 @@ export class AddNewTorrentComponent implements OnInit {
   private torrentService = inject(TorrentService);
   private settingsService = inject(SettingsService);
   private activatedRoute = inject(ActivatedRoute);
+  private destroyRef = inject(DestroyRef);
 
   public fileName: string;
-  public magnetLink: string;
-  private currentTorrentFile: string;
+  public readonly magnetLink = signal('');
 
   public provider: string = 'AllDebrid';
   public downloadClient: number = 0;
 
-  public category: string;
-  public hostDownloadAction: number = 0;
-  public downloadAction: number = 0;
-  public finishedAction: number = 0;
-  public finishedActionDelay: number = 0;
-  public downloadMinSize: number = 0;
-  public includeRegex: string = '';
-  public excludeRegex: string = '';
-  public torrentRetryAttempts: number = 1;
-  public downloadRetryAttempts: number = 3;
-  public torrentDeleteOnError: number = 0;
-  public torrentLifetime: number = 0;
-  public priority: number;
+  public readonly category = signal('');
+  public readonly hostDownloadAction = signal(0);
+  public readonly finishedAction = signal(0);
+  public readonly finishedActionDelay = signal(0);
+  public readonly downloadMinSize = signal(0);
+  public readonly includeRegex = signal('');
+  public readonly excludeRegex = signal('');
+  public readonly torrentRetryAttempts = signal(1);
+  public readonly downloadRetryAttempts = signal(3);
+  public readonly torrentDeleteOnError = signal(0);
+  public readonly torrentLifetime = signal(0);
+  public readonly priority = signal<number | null>(null);
 
-  public availableFiles: TorrentFileAvailability[];
-  public downloadFiles: { [key: string]: boolean } = {};
-  public allSelected: boolean;
-
-  public saving = false;
-  public error: string;
-
-  public includeRegexError: string;
-  public excludeRegexError: string;
-  public regexSelected: TorrentFileAvailability[];
+  public readonly saving = signal(false);
+  public readonly error = signal<string | null>(null);
 
   private selectedFile: File;
 
   ngOnInit(): void {
-    this.activatedRoute.queryParams.subscribe((params) => {
-      if (params['magnet']) {
-        this.magnetLink = decodeURIComponent(params['magnet']);
+    this.activatedRoute.queryParamMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
+      const magnet = params.get('magnet');
+
+      if (magnet) {
+        // The router already decoded the handler parameter; preserve encoding inside the magnet itself.
+        this.magnetLink.set(magnet);
       }
     });
-    this.settingsService.get().subscribe((settings) => {
-      this.category = settings.find((m) => m.key === 'DownloadClient:Default:Category')?.value as string;
-      this.hostDownloadAction = this.downloadAction = settings.find(
-        (m) => m.key === 'DownloadClient:Default:HostDownloadAction'
-      )?.value as number;
-      this.downloadAction =
-        settings.find((m) => m.key === 'DownloadClient:Default:OnlyDownloadAvailableFiles')?.value === true ? 1 : 0;
-      this.finishedAction = settings.find((m) => m.key === 'DownloadClient:Default:FinishedAction')?.value as number;
-      this.finishedActionDelay = settings.find((m) => m.key == 'DownloadClient:Default:FinishedActionDelay')
-        ?.value as number;
-      this.downloadMinSize = settings.find((m) => m.key === 'DownloadClient:Default:MinFileSize')?.value as number;
-      this.includeRegex = settings.find((m) => m.key === 'DownloadClient:Default:IncludeRegex')?.value as string;
-      this.excludeRegex = settings.find((m) => m.key === 'DownloadClient:Default:ExcludeRegex')?.value as string;
-      this.torrentRetryAttempts = settings.find((m) => m.key === 'DownloadClient:Default:TorrentRetryAttempts')
-        ?.value as number;
-      this.downloadRetryAttempts = settings.find((m) => m.key === 'DownloadClient:Default:DownloadRetryAttempts')
-        ?.value as number;
-      this.torrentDeleteOnError = settings.find((m) => m.key === 'DownloadClient:Default:DeleteOnError')
-        ?.value as number;
-      this.torrentLifetime = settings.find((m) => m.key === 'DownloadClient:Default:TorrentLifetime')?.value as number;
-      this.priority = settings.find((m) => m.key === 'DownloadClient:Default:Priority')?.value as number;
-    });
+    this.settingsService
+      .get()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((settings) => {
+        this.category.set(settings.find((m) => m.key === 'DownloadClient:Default:Category')?.value as string);
+        this.hostDownloadAction.set(
+          settings.find((m) => m.key === 'DownloadClient:Default:HostDownloadAction')?.value as number
+        );
+        this.finishedAction.set(
+          settings.find((m) => m.key === 'DownloadClient:Default:FinishedAction')?.value as number
+        );
+        this.finishedActionDelay.set(
+          settings.find((m) => m.key === 'DownloadClient:Default:FinishedActionDelay')?.value as number
+        );
+        this.downloadMinSize.set(settings.find((m) => m.key === 'DownloadClient:Default:MinFileSize')?.value as number);
+        this.includeRegex.set(settings.find((m) => m.key === 'DownloadClient:Default:IncludeRegex')?.value as string);
+        this.excludeRegex.set(settings.find((m) => m.key === 'DownloadClient:Default:ExcludeRegex')?.value as string);
+        this.torrentRetryAttempts.set(
+          settings.find((m) => m.key === 'DownloadClient:Default:TorrentRetryAttempts')?.value as number
+        );
+        this.downloadRetryAttempts.set(
+          settings.find((m) => m.key === 'DownloadClient:Default:DownloadRetryAttempts')?.value as number
+        );
+        this.torrentDeleteOnError.set(
+          settings.find((m) => m.key === 'DownloadClient:Default:DeleteOnError')?.value as number
+        );
+        this.torrentLifetime.set(
+          settings.find((m) => m.key === 'DownloadClient:Default:TorrentLifetime')?.value as number
+        );
+        this.priority.set(settings.find((m) => m.key === 'DownloadClient:Default:Priority')?.value as number);
+      });
   }
 
   public pickFile(evt: Event): void {
     const files = (evt.target as HTMLInputElement).files;
+    const file = files?.item(0);
 
-    if (files.length === 0) {
+    if (!file) {
       return;
     }
 
-    const file = files[0];
-
     this.fileName = file.name;
-
     this.selectedFile = file;
-
-    this.checkFiles();
   }
 
   public ok(): void {
-    this.saving = true;
-    this.error = null;
-
-    let downloadManualFiles: string = null;
-
-    if (this.downloadAction === 2) {
-      const selectedFiles = [];
-      for (const filePath in this.downloadFiles) {
-        if (this.downloadFiles[filePath] === true) {
-          selectedFiles.push(filePath);
-        }
-      }
-
-      if (selectedFiles.length === 0) {
-        this.error = 'No files have been selected to download';
-        return;
-      }
-
-      downloadManualFiles = selectedFiles.join(',');
-    }
+    this.error.set(null);
+    this.saving.set(true);
 
     const torrent = new Torrent();
-    torrent.category = this.category;
-    torrent.hostDownloadAction = this.hostDownloadAction;
-    torrent.downloadAction = this.downloadAction;
-    torrent.finishedAction = this.finishedAction;
-    torrent.finishedActionDelay = this.finishedActionDelay;
-    torrent.downloadMinSize = this.downloadMinSize;
-    torrent.includeRegex = this.includeRegex;
-    torrent.excludeRegex = this.excludeRegex;
-    torrent.downloadManualFiles = downloadManualFiles;
-    torrent.priority = this.priority;
-    torrent.torrentRetryAttempts = this.torrentRetryAttempts;
-    torrent.downloadRetryAttempts = this.downloadRetryAttempts;
-    torrent.deleteOnError = this.torrentDeleteOnError;
-    torrent.lifetime = this.torrentLifetime;
+    torrent.category = this.category();
+    torrent.hostDownloadAction = this.hostDownloadAction();
+    torrent.finishedAction = this.finishedAction();
+    torrent.finishedActionDelay = this.finishedActionDelay();
+    torrent.downloadMinSize = this.downloadMinSize();
+    torrent.includeRegex = this.includeRegex();
+    torrent.excludeRegex = this.excludeRegex();
+    torrent.priority = this.priority();
+    torrent.torrentRetryAttempts = this.torrentRetryAttempts();
+    torrent.downloadRetryAttempts = this.downloadRetryAttempts();
+    torrent.deleteOnError = this.torrentDeleteOnError();
+    torrent.lifetime = this.torrentLifetime();
     torrent.downloadClient = this.downloadClient;
 
-    if (this.magnetLink) {
-      this.torrentService.uploadMagnet(this.magnetLink, torrent).subscribe({
+    if (this.magnetLink()) {
+      this.torrentService.uploadMagnet(this.magnetLink(), torrent).subscribe({
         next: () => this.router.navigate(['/torrents']),
         error: (err) => {
-          this.error = err.error;
-          this.saving = false;
+          this.error.set(err.error);
+          this.saving.set(false);
         },
       });
     } else if (this.selectedFile) {
       this.torrentService.uploadFile(this.selectedFile, torrent).subscribe({
         next: () => this.router.navigate(['/torrents']),
         error: (err) => {
-          this.error = err.error;
-          this.saving = false;
+          this.error.set(err.error);
+          this.saving.set(false);
         },
       });
     } else {
-      this.error = 'No magnet or file uploaded';
-      this.saving = false;
+      this.error.set('No magnet or file uploaded');
+      this.saving.set(false);
     }
-  }
-
-  public onPaste(): void {
-    setTimeout(() => {
-      this.checkFiles();
-    }, 100);
-  }
-
-  public checkFiles(): void {
-    if (this.magnetLink && this.magnetLink === this.currentTorrentFile) {
-      return;
-    }
-
-    this.saving = true;
-    this.error = null;
-    this.availableFiles = null;
-    this.downloadFiles = {};
-    this.allSelected = true;
-
-    if (this.magnetLink) {
-      this.torrentService.checkFilesMagnet(this.magnetLink).subscribe({
-        next: (result) => {
-          this.saving = false;
-          this.availableFiles = result;
-          this.currentTorrentFile = this.magnetLink;
-          result.forEach((file) => {
-            this.downloadFiles[file.filename] = true;
-          });
-        },
-        error: (err) => {
-          this.error = err.error;
-          this.saving = false;
-        },
-      });
-    } else if (this.selectedFile) {
-      this.torrentService.checkFiles(this.selectedFile).subscribe({
-        next: (result) => {
-          this.saving = false;
-          this.availableFiles = result;
-          result.forEach((file) => {
-            this.downloadFiles[file.filename] = true;
-          });
-        },
-        error: (err) => {
-          this.error = err.error;
-          this.saving = false;
-        },
-      });
-    } else {
-      this.saving = false;
-    }
-  }
-
-  public verifyRegex(): void {
-    this.includeRegexError = null;
-    this.excludeRegexError = null;
-    this.regexSelected = null;
-
-    this.torrentService.verifyRegex(this.includeRegex, this.excludeRegex, this.magnetLink).subscribe((result) => {
-      this.includeRegexError = result.includeError;
-      this.excludeRegexError = result.excludeError;
-      this.regexSelected = result.selectedFiles;
-    });
   }
 }

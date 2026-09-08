@@ -4,105 +4,177 @@ using SharpCompress.Archives;
 
 namespace AdbClient.Service.Services;
 
-public class UnpackClient(Download download, string destinationPath)
+public class UnpackClient
 {
-    public bool Finished { get; private set; }
+    private const int LifecycleReady = 0;
+    private const int LifecycleRunning = 1;
+    private const int LifecycleCancelledBeforeStart = 2;
+    private const int LifecycleFinished = 3;
+
+    private readonly TaskCompletionSource _completion = new(
+        TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly CancellationTokenSource _cancellationTokenSource = new();
+    private readonly string _destinationPath;
+    private readonly Download _download;
+    private readonly Func<string, CancellationToken, Task> _unpackOperation;
+    private readonly Torrent _torrent;
+
+    private int _cancellationRequested;
+    private int _completionSignaled;
+    private int _lifecycleState;
+
+    public UnpackClient(Download download, string destinationPath)
+        : this(download, destinationPath, null)
+    {
+    }
+
+    internal UnpackClient(
+        Download download,
+        string destinationPath,
+        Func<string, CancellationToken, Task>? unpackOperation)
+    {
+        _download = download;
+        _destinationPath = destinationPath;
+        _torrent = download.Torrent ?? throw new Exception("Torrent is null");
+        _unpackOperation = unpackOperation ?? Unpack;
+    }
+
+    public bool Finished => Volatile.Read(ref _lifecycleState) == LifecycleFinished;
 
     public string? Error { get; private set; }
 
     public int Progress { get; private set; }
 
-    private readonly Torrent _torrent = download.Torrent ?? throw new Exception("Torrent is null");
-
-    private readonly CancellationTokenSource _cancellationTokenSource = new();
-
     public void Start()
     {
+        if (Interlocked.CompareExchange(
+                ref _lifecycleState,
+                LifecycleRunning,
+                LifecycleReady) != LifecycleReady)
+        {
+            return;
+        }
+
         Progress = 0;
 
         try
         {
-            var filePath = DownloadHelper.GetDownloadPath(destinationPath, _torrent, download) ?? throw new Exception("Invalid download path");
+            var filePath = DownloadHelper.GetDownloadPath(_destinationPath, _torrent, _download) ?? throw new Exception("Invalid download path");
 
-            Task.Run(async delegate
-            {
-                if (!_cancellationTokenSource.IsCancellationRequested)
-                {
-                    await Unpack(filePath, _cancellationTokenSource.Token);
-                }
-            });
+            _ = Task.Run(() => RunUnpack(filePath, _cancellationTokenSource.Token));
         }
         catch (Exception ex)
         {
-            Error = $"An unexpected error occurred preparing download {download.Link} for torrent {_torrent.RdName}: {ex.Message}";
-            Finished = true;
+            var downloadSource = Logger.DescribeDownloadSource(_download);
+            var safeError = Logger.DescribeDownloadFailure(ex, _download);
+            Error = $"An unexpected error occurred preparing {downloadSource} for torrent {_torrent.RdName}: {safeError}";
+            Complete();
         }
     }
 
     public void Cancel()
     {
-        _cancellationTokenSource.Cancel();
+        if (Interlocked.CompareExchange(ref _cancellationRequested, 1, 0) != 0)
+        {
+            return;
+        }
+
+        if (Interlocked.CompareExchange(
+                ref _lifecycleState,
+                LifecycleCancelledBeforeStart,
+                LifecycleReady) == LifecycleReady)
+        {
+            Error = "The unpack was cancelled";
+            Complete();
+            return;
+        }
+
+        if (!Finished)
+        {
+            _cancellationTokenSource.Cancel();
+        }
+    }
+
+    public Task WaitForCompletionAsync(CancellationToken cancellationToken = default)
+    {
+        return _completion.Task.WaitAsync(cancellationToken);
+    }
+
+    internal void MarkCancellationUnconfirmed()
+    {
+        Error ??= "The unpack cancellation could not be confirmed.";
+    }
+
+    private async Task RunUnpack(string filePath, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _unpackOperation(filePath, cancellationToken);
+        }
+        catch (OperationCanceledException) when (_cancellationTokenSource.IsCancellationRequested)
+        {
+            Error ??= "The unpack was cancelled";
+        }
+        catch (Exception ex)
+        {
+            var downloadSource = Logger.DescribeDownloadSource(_download);
+            var safeError = Logger.DescribeDownloadFailure(ex, _download);
+            Error = $"An unexpected error occurred unpacking {downloadSource} for torrent {_torrent.RdName}: {safeError}";
+        }
+        finally
+        {
+            Complete();
+        }
     }
 
     private async Task Unpack(string filePath, CancellationToken cancellationToken)
     {
-        try
+        if (!File.Exists(filePath))
         {
-            if (!File.Exists(filePath))
+            return;
+        }
+
+        var extractPath = _destinationPath;
+        string? extractPathTemp = null;
+
+        var archiveEntries = await GetArchiveFiles(filePath);
+        extractPath = ResolveExtractionPath(_destinationPath, _torrent, archiveEntries);
+
+        if (archiveEntries.Any(m => m.Contains(".r00")))
+        {
+            extractPathTemp = Path.Combine(extractPath, Guid.NewGuid().ToString());
+
+            if (!Directory.Exists(extractPathTemp))
             {
-                return;
-            }
-
-            var extractPath = destinationPath;
-            string? extractPathTemp = null;
-
-            var archiveEntries = await GetArchiveFiles(filePath);
-            extractPath = ResolveExtractionPath(destinationPath, _torrent, archiveEntries);
-
-            if (archiveEntries.Any(m => m.Contains(".r00")))
-            {
-                extractPathTemp = Path.Combine(extractPath, Guid.NewGuid().ToString());
-
-                if (!Directory.Exists(extractPathTemp))
-                {
-                    Directory.CreateDirectory(extractPathTemp);
-                }
-            }
-
-            if (extractPathTemp != null)
-            {
-                await Extract(filePath, extractPathTemp, cancellationToken);
-
-                await FileHelper.Delete(filePath);
-
-                var rarFiles = Directory.GetFiles(extractPathTemp, "*.r00", SearchOption.TopDirectoryOnly);
-
-                foreach (var rarFile in rarFiles)
-                {
-                    var mainRarFile = Path.ChangeExtension(rarFile, ".rar");
-
-                    if (File.Exists(mainRarFile))
-                    {
-                        await Extract(mainRarFile, extractPath, cancellationToken);
-                    }
-
-                    await FileHelper.DeleteDirectory(extractPathTemp);
-                }
-            }
-            else
-            {
-                await Extract(filePath, extractPath, cancellationToken);
-
-                await FileHelper.Delete(filePath);
+                Directory.CreateDirectory(extractPathTemp);
             }
         }
-        catch (Exception ex)
+
+        if (extractPathTemp != null)
         {
-            Error = $"An unexpected error occurred unpacking {download.Link} for torrent {_torrent.RdName}: {ex.Message}";
+            await Extract(filePath, extractPathTemp, cancellationToken);
+
+            await FileHelper.Delete(filePath);
+
+            var rarFiles = Directory.GetFiles(extractPathTemp, "*.r00", SearchOption.TopDirectoryOnly);
+
+            foreach (var rarFile in rarFiles)
+            {
+                var mainRarFile = Path.ChangeExtension(rarFile, ".rar");
+
+                if (File.Exists(mainRarFile))
+                {
+                    await Extract(mainRarFile, extractPath, cancellationToken);
+                }
+
+                await FileHelper.DeleteDirectory(extractPathTemp);
+            }
         }
-        finally
+        else
         {
-            Finished = true;
+            await Extract(filePath, extractPath, cancellationToken);
+
+            await FileHelper.Delete(filePath);
         }
     }
 
@@ -164,5 +236,21 @@ public class UnpackClient(Download download, string destinationPath)
         }
 
         return extractPath;
+    }
+
+    private void Complete()
+    {
+        if (Interlocked.CompareExchange(ref _completionSignaled, 1, 0) != 0)
+        {
+            return;
+        }
+
+        if (Volatile.Read(ref _cancellationRequested) != 0)
+        {
+            Error ??= "The unpack was cancelled";
+        }
+
+        Volatile.Write(ref _lifecycleState, LifecycleFinished);
+        _completion.TrySetResult();
     }
 }

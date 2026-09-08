@@ -4,8 +4,8 @@
     <OutputType>Exe</OutputType>
     <UserSecretsId>94c24cba-f03f-4453-a671-3640b517c573</UserSecretsId>
     <!-- x-release-please-start-version -->
-    <Version>1.6.0</Version>
-    <AssemblyVersion>1.6.0</AssemblyVersion>
+    <Version>1.6.1</Version>
+    <AssemblyVersion>1.6.1</AssemblyVersion>
     <!-- x-release-please-end -->
     <AssemblyName>AdbClient.Web</AssemblyName>
     <RootNamespace>AdbClient.Web</RootNamespace>
@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <None Remove="service-install.bat" />
+    <None Remove="service-firewall.ps1" />
     <None Remove="service-remove.bat" />
     <None Remove="update.cmd" />
     <None Remove="update.ps1" />
@@ -21,9 +22,15 @@
   <ItemGroup>
     <Content Include="service-install.bat">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </Content>
+    <Content Include="service-firewall.ps1">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
     </Content>
     <Content Include="service-remove.bat">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
     </Content>
     <Content Include="update.cmd">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>

@@ -1,6 +1,7 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using AdbClient.Data.Enums;
 using AdbClient.Data.Models.TorrentClient;
 
@@ -14,10 +15,22 @@ public class Torrent
     public string Hash { get; set; } = null!;
 
     public string? Category { get; set; }
-        
+
+    [JsonIgnore]
+    public string? LocalDownloadPath { get; set; }
+
+    [JsonIgnore]
+    public string? ClientReportedDownloadPath { get; set; }
+
+    [JsonIgnore]
+    public bool QbittorrentHidden { get; set; }
+
+    [NotMapped]
+    public bool ExternalClientRemoved => QbittorrentHidden;
+
     public TorrentDownloadAction DownloadAction { get; set; }
     public TorrentFinishedAction FinishedAction { get; set; }
-    public int  FinishedActionDelay { get; set; }
+    public int FinishedActionDelay { get; set; }
     public TorrentHostDownloadAction HostDownloadAction { get; set; }
     public int DownloadMinSize { get; set; }
     public string? IncludeRegex { get; set; }
@@ -57,6 +70,9 @@ public class Torrent
     public DateTimeOffset? RdAdded { get; set; }
     public DateTimeOffset? RdEnded { get; set; }
     public long? RdSpeed { get; set; }
+
+    // Retained for database compatibility with earlier versions.
+    [JsonIgnore]
     public long? RdSeeders { get; set; }
     public string? RdFiles { get; set; }
 

@@ -19,5 +19,4 @@ public class TorrentClientTorrent
     public List<string>? Links { get; set; }
     public DateTimeOffset? Ended { get; set; }
     public long? Speed { get; set; }
-    public long? Seeders { get; set; }
 }

@@ -1,20 +1,55 @@
-﻿using AdbClient.Data.Enums;
+using AdbClient.Data.Enums;
 using AdbClient.Data.Models.Data;
 using AdbClient.Service.Helpers;
 using AdbClient.Service.Services.Downloaders;
 
 namespace AdbClient.Service.Services;
 
-public class DownloadClient(Download download, Torrent torrent, string destinationPath)
+public class DownloadClient
 {
+    private const int LifecycleReady = 0;
+    private const int LifecycleRunning = 1;
+    private const int LifecycleCancelledBeforeStart = 2;
+    private const int LifecycleFinished = 3;
+
     private static long _totalBytesDownloadedThisSession;
     private static readonly Lock TotalBytesDownloadedLock = new();
 
-    public IDownloader? Downloader;
+    private readonly Download _download;
+    private readonly Func<string, string, IDownloader> _downloaderFactory;
+    private readonly TaskCompletionSource<DownloadCompleteEventArgs> _completion = new(
+        TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly string _destinationPath;
+    private readonly Torrent _torrent;
+
+    private int _cancellationRequested;
+    private int _completionSignaled;
+    private int _downloaderCancellationIssued;
+    private int _lifecycleState;
+    private IDownloader? _downloader;
+
+    public DownloadClient(Download download, Torrent torrent, string destinationPath)
+        : this(download, torrent, destinationPath, (uri, filePath) => new InternalDownloader(uri, filePath))
+    {
+    }
+
+    internal DownloadClient(
+        Download download,
+        Torrent torrent,
+        string destinationPath,
+        Func<string, string, IDownloader> downloaderFactory)
+    {
+        _download = download;
+        _torrent = torrent;
+        _destinationPath = destinationPath;
+        _downloaderFactory = downloaderFactory;
+    }
+
+    public IDownloader? Downloader => Volatile.Read(ref _downloader);
 
     public Data.Enums.DownloadClient Type { get; private set; }
 
-    public bool Finished { get; private set; }
+    public bool Finished => Volatile.Read(ref _lifecycleState) == LifecycleFinished;
 
     public string? Error { get; private set; }
 
@@ -26,21 +61,31 @@ public class DownloadClient(Download download, Torrent torrent, string destinati
 
     public async Task<string> Start()
     {
+        if (Interlocked.CompareExchange(
+                ref _lifecycleState,
+                LifecycleRunning,
+                LifecycleReady) != LifecycleReady)
+        {
+            throw new InvalidOperationException("The download client cannot be started more than once or after cancellation.");
+        }
+
         BytesDone = 0;
         BytesTotal = 0;
         Speed = 0;
 
         try
         {
-            Type = torrent.DownloadClient;
+            Type = _torrent.DownloadClient;
 
-            if (download.Link == null)
+            if (_download.Link == null)
             {
                 throw new Exception($"Invalid download link");
             }
 
-            var filePath = DownloadHelper.GetDownloadPath(destinationPath, torrent, download);
-            var downloadPath = DownloadHelper.GetDownloadPath(torrent, download);
+            ThrowIfCancellationRequested();
+
+            var filePath = DownloadHelper.GetDownloadPath(_destinationPath, _torrent, _download);
+            var downloadPath = DownloadHelper.GetDownloadPath(_torrent, _download);
 
             if (filePath == null || downloadPath == null)
             {
@@ -48,20 +93,21 @@ public class DownloadClient(Download download, Torrent torrent, string destinati
             }
 
             await FileHelper.Delete(filePath);
+            ThrowIfCancellationRequested();
 
-            Downloader = Type switch
+            var downloader = Type switch
             {
-                Data.Enums.DownloadClient.Internal => new InternalDownloader(download.Link, filePath),
+                Data.Enums.DownloadClient.Internal => _downloaderFactory(_download.Link, filePath),
                 _ => throw new Exception($"Unknown download client {Type}")
             };
+            Volatile.Write(ref _downloader, downloader);
 
-            Downloader.DownloadComplete += (_, args) =>
+            downloader.DownloadComplete += (_, args) =>
             {
-                Finished = true;
-                Error ??= args.Error;
+                Complete(args);
             };
 
-            Downloader.DownloadProgress += (_, args) =>
+            downloader.DownloadProgress += (_, args) =>
             {
                 Speed = args.Speed;
                 BytesDone = args.BytesDone;
@@ -74,33 +120,68 @@ public class DownloadClient(Download download, Torrent torrent, string destinati
                 AddToTotalBytesDownloadedThisSession(bytesAdded);
             };
 
-            var result = await Downloader.Download();
+            if (Volatile.Read(ref _cancellationRequested) != 0)
+            {
+                await CancelDownloaderOnce();
+                ThrowIfCancellationRequested();
+            }
+
+            var result = await downloader.Download();
 
             return result;
         }
         catch (Exception ex)
         {
-            if (Downloader != null)
+            var safeError = Logger.DescribeDownloadFailure(ex, _download);
+            Error = safeError;
+            var downloadSource = Logger.DescribeDownloadSource(_download);
+            Exception? cancellationError = null;
+
+            try
             {
-                await Downloader.Cancel();
+                await CancelDownloaderOnce();
+            }
+            catch (Exception cancelException)
+            {
+                cancellationError = new Exception(Logger.DescribeDownloadFailure(cancelException, _download));
             }
 
-            Finished = true;
+            Complete(new() { Error = safeError });
 
-            throw new Exception($"An unexpected error occurred preparing download {download.Link} for torrent {torrent.RdName}: {ex.Message}");
+            var preparationError = new Exception(safeError);
+
+            throw new Exception(
+                $"An unexpected error occurred preparing {downloadSource} for torrent {_torrent.RdName}: {safeError}",
+                cancellationError == null
+                    ? preparationError
+                    : new AggregateException(preparationError, cancellationError));
         }
+    }
+
+    public Task<DownloadCompleteEventArgs> WaitForCompletionAsync(CancellationToken cancellationToken = default)
+    {
+        return _completion.Task.WaitAsync(cancellationToken);
+    }
+
+    internal void MarkCancellationUnconfirmed()
+    {
+        Error ??= "The download cancellation could not be confirmed.";
     }
 
     public async Task Cancel()
     {
-        Finished = true;
-        Error = null;
+        Interlocked.Exchange(ref _cancellationRequested, 1);
 
-        if (Downloader == null)
+        if (Interlocked.CompareExchange(
+                ref _lifecycleState,
+                LifecycleCancelledBeforeStart,
+                LifecycleReady) == LifecycleReady)
         {
+            Complete(new() { Error = "The download was cancelled" });
             return;
         }
-        await Downloader.Cancel();
+
+        await CancelDownloaderOnce();
     }
 
     public async Task Pause()
@@ -134,6 +215,50 @@ public class DownloadClient(Download download, Torrent torrent, string destinati
         lock (TotalBytesDownloadedLock)
         {
             _totalBytesDownloadedThisSession += bytes;
+        }
+    }
+
+    private async Task CancelDownloaderOnce()
+    {
+        var downloader = Downloader;
+
+        if (downloader == null ||
+            Interlocked.CompareExchange(ref _downloaderCancellationIssued, 1, 0) != 0)
+        {
+            return;
+        }
+
+        try
+        {
+            await downloader.Cancel();
+            Complete(new() { Error = "The download was cancelled" });
+        }
+        catch
+        {
+            Interlocked.Exchange(ref _downloaderCancellationIssued, 0);
+            throw;
+        }
+    }
+
+    private void Complete(DownloadCompleteEventArgs args)
+    {
+        if (Interlocked.CompareExchange(ref _completionSignaled, 1, 0) != 0)
+        {
+            return;
+        }
+
+        Error ??= args.Error ?? (Volatile.Read(ref _cancellationRequested) != 0
+            ? "The download was cancelled"
+            : null);
+        Volatile.Write(ref _lifecycleState, LifecycleFinished);
+        _completion.TrySetResult(args);
+    }
+
+    private void ThrowIfCancellationRequested()
+    {
+        if (Volatile.Read(ref _cancellationRequested) != 0)
+        {
+            throw new OperationCanceledException("The download was cancelled before it started.");
         }
     }
 }
