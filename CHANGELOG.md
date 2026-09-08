@@ -7,20 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
-### Fixed
+## [1.6.1](https://github.com/krakn-dev/alldebrid-client/compare/v1.6.0...v1.6.1) (2026-09-08)
 
-- Preserve existing databases when upgrading custom relative startup paths; reject ambiguous paths before replacing application files.
-- Preserve the cursor and selection when pasting into the magnet field.
-- Keep torrent-settings drafts and show retry feedback when saving fails, without displaying unsaved values.
-- Use a shared orange-accent dark theme and standard buttons while preserving premium status colors.
-- Sort torrent counts correctly without mutating live data, and restrict bulk selection to matching rows.
+### Changed
+
+- Organize settings by responsibility, with clearer download defaults, storage paths, integration paths, and account setup.
+- Use a shared orange-accent dark theme and standard buttons, preserving green, orange, and red premium-status indicators.
 - Add resizable, single-line torrent columns, a wider list layout, and compact dates with full timestamp tooltips.
-- Pin settings, add-torrent, and torrent-management actions to the bottom of the window on short and long pages, including save feedback.
+- Pin settings, add-torrent, and torrent-management actions to the bottom of the window.
 - Show external-client removal separately from download status without changing categories or assuming an import succeeded.
 - Remove seeder tracking and seeder-based stalled states; use AllDebrid's reported download state instead.
-- Preserve encoded trackers and literal percent signs when opening magnet links.
-- Explain browser magnet-handler permissions without claiming a request is an active registration.
-- Reuse the source deployment script for UAC elevation, with a read-only dry run and output in the original terminal.
+
+### Fixed
+
+- Make asynchronous pages and save feedback update reliably; retain torrent-settings drafts after failed saves without displaying unsaved values.
+- Preserve native magnet-paste behavior, encoded trackers, literal percent signs, and reverse-proxy base paths. Explain browser registration requirements without claiming a handler is already active.
+- Correct torrent sorting and filtered bulk selection, and require an explicit action before deletion.
+- Honor configured record-retention policies for qBittorrent clients and allow retained jobs to be added again.
+- Stop active work before deleting its payload, preserve files during provider reconciliation, and keep existing jobs on their captured download paths.
+- Validate runtime settings and account changes while preserving released setting keys and existing provider configuration.
+- Bound filter evaluation, provider polling calculations, and completion-command runtime; skip completion commands when no files were downloaded.
+- Protect authenticated live-update connections and keep credentials, sensitive URLs, and database values out of logs.
+- Preserve existing relative startup-path semantics and guard database, log, and application locations during publishing and updates.
+- Make Windows deployment recoverable and reuse the deployment script for elevation, with a read-only dry run.
+- Avoid scanning completed downloads when the container starts.
+
+### Upgrade notes
+
+- Standard Windows and Docker installations require no startup-path changes. If you configured relative `DataPath`, `Database:Path`, or `Logging:File:Path` values, set them to the absolute locations of the existing data before an in-place Windows update. The updater refuses ambiguous paths; it does not relocate data. See [configuration](docs/configuration.md#startup-configuration).
+- Existing categories ending in `-retained` are not renamed automatically because that suffix may be intentional.
 
 ## [1.6.0](https://github.com/krakn-dev/alldebrid-client/compare/v1.5.2...v1.6.0) (2026-09-04)
 
