@@ -27,7 +27,9 @@ Use an absolute, writable `DataPath` outside the application directory. This kee
 
 The supplied container and its built-in health check use internal port `6500`. To expose another host port, change only the host side of the Docker mapping, such as `8080:6500`. If you override the container's internal `Port`, also update its port mapping and health check.
 
-Advanced installations can set `Database:Path` and `Logging:File:Path`. Relative overrides resolve beneath `DataPath` and cannot traverse outside it; absolute overrides are also supported. The database and log must resolve to different files. Nested environment-variable keys use double underscores, such as `Database__Path`. `Logging:File:FileSizeLimitBytes` and `Logging:File:MaxRollingFiles` override log rotation limits. Most installations should leave these overrides unset.
+Advanced installations can set `Database:Path` and `Logging:File:Path`. When unset, these default to `adbclient.db` and `adbclient.log` beneath `DataPath`. Explicit relative overrides, like relative `DataPath` values, retain their version 1.6.0 meaning: they resolve against the process working directory, not the application directory or `DataPath`. The database and log must resolve to different files. Nested environment-variable keys use double underscores, such as `Database__Path`. `Logging:File:FileSizeLimitBytes` and `Logging:File:MaxRollingFiles` override log rotation limits. Most installations should leave these overrides unset.
+
+Before replacing an installation with custom relative startup paths, set those values to the absolute locations of its **existing** data. The Windows updater and source deployment/publish scripts refuse ambiguous relative persistent paths rather than guess where an existing database resides. This does not move any files. Standard Windows and Docker defaults already use absolute paths and require no change.
 
 ## Runtime settings
 

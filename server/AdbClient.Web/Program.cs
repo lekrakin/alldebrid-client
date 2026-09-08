@@ -19,7 +19,7 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 // Bind AppSettings
 var appSettings = new AppSettings();
 builder.Configuration.Bind(appSettings);
-appSettings.NormalizeAndValidate(builder.Environment.ContentRootPath,
+appSettings.NormalizeAndValidate(Environment.CurrentDirectory,
                                  Environment.GetEnvironmentVariable("BASE_PATH"));
 builder.Services.AddSingleton(appSettings);
 

@@ -1,4 +1,5 @@
 using AdbClient.Data.Models.Internal;
+using Microsoft.Data.Sqlite;
 
 namespace AdbClient.Service.Test.Data;
 
@@ -7,12 +8,12 @@ public class AppSettingsTest
     [Fact]
     public void NormalizeAndValidate_DefaultsAreAbsoluteAndSelfContained()
     {
-        var contentRoot = NewAbsolutePath("app");
+        var workingDirectory = NewAbsolutePath("working");
         var settings = new AppSettings { DataPath = "state" };
 
-        settings.NormalizeAndValidate(contentRoot);
+        settings.NormalizeAndValidate(workingDirectory);
 
-        var expectedDataPath = Path.GetFullPath("state", contentRoot);
+        var expectedDataPath = Path.GetFullPath("state", workingDirectory);
         Assert.Equal(expectedDataPath, settings.DataPath);
         Assert.Equal(AppSettings.DefaultPort, settings.Port);
         Assert.Null(settings.BasePath);
@@ -25,9 +26,9 @@ public class AppSettingsTest
     }
 
     [Fact]
-    public void NormalizeAndValidate_ResolvesRelativeFilesFromDataPath()
+    public void NormalizeAndValidate_PreservesWorkingDirectoryRelativeOverrides()
     {
-        var contentRoot = NewAbsolutePath("app");
+        var workingDirectory = NewAbsolutePath("working");
         var settings = new AppSettings
         {
             DataPath = "state",
@@ -38,10 +39,10 @@ public class AppSettingsTest
             }
         };
 
-        settings.NormalizeAndValidate(contentRoot);
+        settings.NormalizeAndValidate(workingDirectory);
 
-        Assert.Equal(Path.Combine(settings.DataPath, "database", "custom.db"), settings.Database.Path);
-        Assert.Equal(Path.Combine(settings.DataPath, "logs", "custom.log"), settings.Logging.File.Path);
+        Assert.Equal(Path.Combine(workingDirectory, "database", "custom.db"), settings.Database.Path);
+        Assert.Equal(Path.Combine(workingDirectory, "logs", "custom.log"), settings.Logging.File.Path);
         Assert.Equal(AppSettingsLoggingFile.DefaultFileSizeLimitBytes,
                      settings.Logging.File.FileSizeLimitBytes);
         Assert.Equal(AppSettingsLoggingFile.DefaultMaxRollingFiles,
@@ -190,7 +191,7 @@ public class AppSettingsTest
     [Theory]
     [InlineData("Database")]
     [InlineData("Logging")]
-    public void NormalizeAndValidate_RejectsRelativeFileOutsideDataPath(string setting)
+    public void NormalizeAndValidate_PreservesExplicitParentRelativePaths(string setting)
     {
         var settings = ValidSettings();
         var escapingPath = Path.Combine("..", "outside.db");
@@ -207,10 +208,63 @@ public class AppSettingsTest
             };
         }
 
-        var exception = Assert.Throws<InvalidOperationException>(
-            () => settings.NormalizeAndValidate(NewAbsolutePath("app")));
+        var workingDirectory = NewAbsolutePath("app");
+        settings.NormalizeAndValidate(workingDirectory);
 
-        Assert.Contains("DataPath", exception.Message);
+        var actual = setting == "Database" ? settings.Database!.Path : settings.Logging!.File!.Path;
+        Assert.Equal(Path.GetFullPath(escapingPath, workingDirectory), actual);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task NormalizeAndValidate_UpgradeReopensExistingRelativeDatabase(bool explicitOverride)
+    {
+        // Keep the fixture on the working directory's drive so the path is relative on Windows too.
+        var fixtureName = $"adbclient-upgrade-test-{Guid.NewGuid():N}";
+        var fixtureRoot = Path.Combine(Environment.CurrentDirectory, fixtureName);
+        var relativeDataPath = Path.Combine(fixtureName, "state");
+        var legacyDatabasePath = explicitOverride
+            ? Path.Combine(fixtureName, "custom.db")
+            : Path.Combine(relativeDataPath, "adbclient.db");
+        Directory.CreateDirectory(Path.Combine(fixtureRoot, "state"));
+
+        try
+        {
+            await using (var legacy = new SqliteConnection(new SqliteConnectionStringBuilder
+                         { DataSource = legacyDatabasePath, Pooling = false }.ToString()))
+            {
+                await legacy.OpenAsync();
+                await using var command = legacy.CreateCommand();
+                command.CommandText = "CREATE TABLE UpgradeSentinel (Value TEXT); INSERT INTO UpgradeSentinel VALUES ('existing data');";
+                await command.ExecuteNonQueryAsync();
+            }
+
+            var settings = new AppSettings
+            {
+                DataPath = relativeDataPath,
+                Database = new AppSettingsDatabase { Path = explicitOverride ? legacyDatabasePath : null }
+            };
+            settings.NormalizeAndValidate(Environment.CurrentDirectory);
+            Assert.Equal(Path.GetFullPath(legacyDatabasePath), settings.Database.Path);
+            Assert.Equal(Path.GetFullPath(relativeDataPath), settings.DataPath);
+
+            // A repeated normalization must not rebase already captured absolute paths.
+            settings.NormalizeAndValidate(Path.Combine(fixtureRoot, "different-working-directory"));
+            Assert.Equal(Path.GetFullPath(legacyDatabasePath), settings.Database.Path);
+
+            await using var upgraded = new SqliteConnection(new SqliteConnectionStringBuilder
+            { DataSource = settings.Database.Path, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
+            await upgraded.OpenAsync();
+            await using var read = upgraded.CreateCommand();
+            read.CommandText = "SELECT Value FROM UpgradeSentinel";
+            Assert.Equal("existing data", await read.ExecuteScalarAsync());
+            Assert.Single(Directory.GetFiles(fixtureRoot, "*.db", SearchOption.AllDirectories));
+        }
+        finally
+        {
+            Directory.Delete(fixtureRoot, recursive: true);
+        }
     }
 
     [Theory]

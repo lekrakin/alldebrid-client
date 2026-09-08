@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Preserve existing databases when upgrading custom relative startup paths; reject ambiguous paths before replacing application files.
+- Preserve the cursor and selection when pasting into the magnet field.
+- Keep torrent-settings drafts and show retry feedback when saving fails, without displaying unsaved values.
 - Use a shared orange-accent dark theme and standard buttons while preserving premium status colors.
 - Sort torrent counts correctly without mutating live data, and restrict bulk selection to matching rows.
 - Add resizable, single-line torrent columns, a wider list layout, and compact dates with full timestamp tooltips.

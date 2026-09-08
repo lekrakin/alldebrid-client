@@ -44,6 +44,31 @@ function Resolve-ConfiguredPath([string]$Path, [string]$BasePath) {
     return [System.IO.Path]::GetFullPath((Join-Path $BasePath $Path))
 }
 
+function Assert-ExistingPersistentPathsAbsolute($Settings) {
+    $paths = @{
+        DataPath = if ([string]::IsNullOrWhiteSpace($Settings.DataPath)) { './data' } else { $Settings.DataPath }
+        'Database:Path' = $Settings.Database.Path
+        'Logging:File:Path' = $Settings.Logging.File.Path
+    }
+
+    foreach ($settingName in $paths.Keys) {
+        $path = $paths[$settingName]
+        if ([string]::IsNullOrWhiteSpace($path)) { continue }
+
+        # Unlike IsPathRooted, this rejects drive-relative and root-relative Windows paths.
+        $normalized = $path.Trim().Replace('/', '\')
+        $isAbsolute = if ([IO.Path]::DirectorySeparatorChar -eq '\') {
+            $normalized -match '^[A-Za-z]:\\' -or
+            $normalized -match '^\\\\(?![.?](?:\\|$))[^\\]+\\[^\\]+(?:\\|$)'
+        } else {
+            $path.Trim().StartsWith('/')
+        }
+        if (-not $isAbsolute) {
+            throw "Existing $settingName '$path' is relative or not fully qualified. Configure an absolute path to its existing location in appsettings.json before publishing. The previous process working directory cannot be inferred safely; -DataPath does not migrate existing data."
+        }
+    }
+}
+
 function Get-ServiceApplicationPath([string]$PathName) {
     $tokens = [regex]::Matches($PathName, '"([^"]+)"|(\S+)') | ForEach-Object {
         if ($_.Groups[1].Success) { $_.Groups[1].Value } else { $_.Groups[2].Value }
@@ -154,6 +179,8 @@ if (Test-Path -LiteralPath $existingSettingsPath -PathType Leaf) {
     } catch {
         throw "Existing startup configuration is not valid JSON: $existingSettingsPath"
     }
+
+    Assert-ExistingPersistentPathsAbsolute $existingSettings
 }
 
 if ([string]::IsNullOrWhiteSpace($DataPath)) {

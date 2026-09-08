@@ -243,12 +243,19 @@ function Test-SameOrDescendantPath([string]$Parent, [string]$Candidate) {
     return $normalizedCandidate.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)
 }
 
-function Resolve-ConfiguredPath([string]$Path, [string]$BasePath) {
-    if ([System.IO.Path]::IsPathRooted($Path)) {
-        return [System.IO.Path]::GetFullPath($Path)
+function Test-AbsolutePath([string]$Path) {
+    # IsPathRooted also accepts C:relative and \root-relative on Windows.
+    $normalized = $Path.Replace('/', '\')
+    return $normalized -match '^[A-Za-z]:\\' -or
+           $normalized -match '^\\\\(?![.?](?:\\|$))[^\\]+\\[^\\]+(?:\\|$)'
+}
+
+function Resolve-ConfiguredPath([string]$Path, [string]$SettingName) {
+    if (-not (Test-AbsolutePath $Path)) {
+        throw "$SettingName '$Path' is relative or not fully qualified. Configure an absolute path to its existing location before deploying. The previous process working directory cannot be inferred safely; do not create a new data location."
     }
 
-    return [System.IO.Path]::GetFullPath((Join-Path $BasePath $Path))
+    return [System.IO.Path]::GetFullPath($Path)
 }
 
 function Assert-PersistentPathsOutsideApplication([string[]]$PersistentPaths, [string]$ApplicationDirectory) {
@@ -388,17 +395,21 @@ if ([string]::IsNullOrWhiteSpace($configuredDataPath)) {
     throw "The service's effective DataPath must not be blank."
 }
 
-$dataDirectory = Resolve-ConfiguredPath $configuredDataPath.Trim() $appDirectory
+$dataDirectory = Resolve-ConfiguredPath $configuredDataPath.Trim() 'DataPath'
 $persistentPaths = @($dataDirectory)
 
 $configuredDatabasePath = Get-ConfiguredValue $currentSettings 'Database:Path' $null $serviceEnvironment $service.PathName
-if (-not [string]::IsNullOrWhiteSpace($configuredDatabasePath)) {
-    $persistentPaths += Resolve-ConfiguredPath $configuredDatabasePath.Trim() $dataDirectory
+if ([string]::IsNullOrWhiteSpace($configuredDatabasePath)) {
+    $persistentPaths += Join-Path $dataDirectory 'adbclient.db'
+} else {
+    $persistentPaths += Resolve-ConfiguredPath $configuredDatabasePath.Trim() 'Database:Path'
 }
 
 $configuredLogPath = Get-ConfiguredValue $currentSettings 'Logging:File:Path' $null $serviceEnvironment $service.PathName
-if (-not [string]::IsNullOrWhiteSpace($configuredLogPath)) {
-    $persistentPaths += Resolve-ConfiguredPath $configuredLogPath.Trim() $dataDirectory
+if ([string]::IsNullOrWhiteSpace($configuredLogPath)) {
+    $persistentPaths += Join-Path $dataDirectory 'adbclient.log'
+} else {
+    $persistentPaths += Resolve-ConfiguredPath $configuredLogPath.Trim() 'Logging:File:Path'
 }
 
 Assert-PersistentPathsOutsideApplication $persistentPaths $appDirectory

@@ -159,18 +159,25 @@ function Get-ConfiguredValue($Settings, [string]$Key, $DefaultValue, $Environmen
     return $configuredValue.ToString()
 }
 
-function Resolve-ConfiguredPath([string]$Path, [string]$BasePath, [string]$SettingName) {
+function Test-AbsolutePath([string]$Path) {
+    # IsPathRooted also accepts C:relative and \root-relative on Windows.
+    $normalized = $Path.Replace('/', '\')
+    return $normalized -match '^[A-Za-z]:\\' -or
+           $normalized -match '^\\\\(?![.?](?:\\|$))[^\\]+\\[^\\]+(?:\\|$)'
+}
+
+function Resolve-ConfiguredPath([string]$Path, [string]$SettingName) {
     if ([string]::IsNullOrWhiteSpace($Path)) {
         throw "$SettingName must not be blank."
     }
 
     $trimmedPath = $Path.Trim()
-    try {
-        if ([IO.Path]::IsPathRooted($trimmedPath)) {
-            return [IO.Path]::GetFullPath($trimmedPath)
-        }
+    if (-not (Test-AbsolutePath $trimmedPath)) {
+        throw "$SettingName '$trimmedPath' is relative or not fully qualified. Configure an absolute path to its existing location before updating. The previous process working directory cannot be inferred safely; do not create a new data location."
+    }
 
-        return [IO.Path]::GetFullPath((Join-Path $BasePath $trimmedPath))
+    try {
+        return [IO.Path]::GetFullPath($trimmedPath)
     } catch {
         throw "$SettingName is not a valid filesystem path."
     }
@@ -182,10 +189,11 @@ function Resolve-ConfiguredFilePath(
     [string]$SettingName,
     [string]$DefaultFileName
 ) {
-    $configuredPath = if ([string]::IsNullOrWhiteSpace($Path)) { $DefaultFileName } else { $Path.Trim() }
+    $configuredPath = if ([string]::IsNullOrWhiteSpace($Path)) { Join-Path $DataPath $DefaultFileName } else { $Path.Trim() }
+    $resolvedPath = Resolve-ConfiguredPath $configuredPath $SettingName
 
     try {
-        $fileName = [IO.Path]::GetFileName($configuredPath)
+        $fileName = [IO.Path]::GetFileName($resolvedPath)
     } catch {
         throw "$SettingName is not a valid filesystem path."
     }
@@ -194,19 +202,12 @@ function Resolve-ConfiguredFilePath(
         throw "$SettingName must identify a file, not a directory."
     }
 
-    $isRooted = [IO.Path]::IsPathRooted($configuredPath)
-    $resolvedPath = Resolve-ConfiguredPath $configuredPath $DataPath $SettingName
-    if (-not $isRooted -and -not (Test-SameOrDescendant $DataPath $resolvedPath)) {
-        throw "Relative $SettingName must remain inside DataPath."
-    }
-
     return $resolvedPath
 }
 
 function Get-PersistentPaths($Settings, [string]$ApplicationDirectory, $EnvironmentValues, [string]$PathName) {
     $dataPath = Resolve-ConfiguredPath `
         (Get-ConfiguredValue $Settings 'DataPath' './data' $EnvironmentValues $PathName) `
-        $ApplicationDirectory `
         'DataPath'
     $databasePath = Resolve-ConfiguredFilePath `
         (Get-ConfiguredValue $Settings 'Database:Path' $null $EnvironmentValues $PathName) `
@@ -541,17 +542,6 @@ try {
         throw "This updater supports Windows installations only. Use the published container image on Docker."
     }
 
-    $requiresElevation = -not $CheckOnly -and -not $ValidateOnly -and -not $WhatIfPreference
-    if ($requiresElevation -and -not (Test-IsAdministrator)) {
-        if ($Elevated) {
-            throw "The elevated updater did not receive administrator privileges."
-        }
-
-        $elevatedExitCode = Start-ElevatedUpdater
-        $Pause = $false
-        exit $elevatedExitCode
-    }
-
     $service = Get-CimInstance Win32_Service -Filter "Name='$ServiceName'" -ErrorAction SilentlyContinue
     if ($null -eq $service) {
         throw "Windows service '$ServiceName' was not found. Install the service before using this updater."
@@ -596,6 +586,17 @@ try {
     $settings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
     $serviceEnvironment = Get-ServiceEnvironmentValues $ServiceName
     Assert-PersistentPathsOutsideApplication $settings $ApplicationDirectory $serviceEnvironment $service.PathName
+
+    $requiresElevation = -not $CheckOnly -and -not $ValidateOnly -and -not $WhatIfPreference
+    if ($requiresElevation -and -not (Test-IsAdministrator)) {
+        if ($Elevated) {
+            throw "The elevated updater did not receive administrator privileges."
+        }
+
+        $elevatedExitCode = Start-ElevatedUpdater
+        $Pause = $false
+        exit $elevatedExitCode
+    }
 
     $currentVersion = Get-ApplicationVersion $ApplicationDirectory
     $release = Get-LatestRelease
